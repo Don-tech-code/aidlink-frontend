@@ -67,7 +67,7 @@ export default function DashboardPage() {
     },
   ]
 
-  const transactions = useRealTimeTransactions(mockTransactions)
+  const { transactions } = useRealTimeTransactions(mockTransactions)
 
   if (!isConnected) {
     return (
