@@ -31,7 +31,7 @@ import { formatAmount, formatDate } from '@/lib/utils'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { useQueryClient } from '@tanstack/react-query'
-import { useDonation, WalletNotConnectedError } from '@/hooks/use-donation'
+import { useDonation, WalletNotConnectedError, classifyDonationError } from '@/hooks/use-donation'
 import { useParams, useRouter } from 'next/navigation'
 import { calculateCampaignProgress } from '@/lib/utils'
 
@@ -146,8 +146,9 @@ export default function CampaignDetailPage() {
         })
         router.push('/auth')
       } else {
+        console.error('[CampaignDetailPage] donate() threw:', err)
         toast.error('Donation failed', {
-          description: err instanceof Error ? err.message : 'Please try again later',
+          description: classifyDonationError(err),
         })
       }
     }

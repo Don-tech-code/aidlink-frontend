@@ -65,6 +65,101 @@ export class WalletNotConnectedError extends Error {
   }
 }
 
+/**
+ * Carries a message that is ALREADY user-friendly (e.g. built by mapResultCode,
+ * decodeResultXdr, or a known failure path below). classifyDonationError()
+ * passes these through untouched instead of re-classifying them.
+ */
+export class DonationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'DonationError'
+  }
+}
+
+/**
+ * Turn *any* error thrown/rejected during the donation flow into a single,
+ * user-friendly sentence — never leak raw SDK/network/XDR text into the UI.
+ *
+ * - DonationError → already-friendly message, pass through
+ * - Wallet signing was cancelled/declined → friendly "you cancelled" message
+ * - Wallet extension missing/locked → friendly install/unlock message
+ * - Network/connectivity failure → friendly network message
+ * - Client-side timeout → friendly timeout message
+ * - Anything else → generic friendly fallback (technical detail stays in the
+ *   console via console.error, not in front of the user)
+ */
+export function classifyDonationError(err: unknown): string {
+  if (err instanceof DonationError) {
+    return err.message
+  }
+
+  if (err instanceof WalletNotConnectedError) {
+    return 'Please connect your wallet to continue'
+  }
+
+  const raw = err instanceof Error ? err.message : typeof err === 'string' ? err : ''
+  const text = raw.toLowerCase()
+
+  // Wallet extension missing, locked, or unreachable — check before the
+  // generic rejection/network branches since it can mention "not installed"
+  if (
+    text.includes('freighter is not installed') ||
+    text.includes('freighter not installed') ||
+    text.includes('extension not found') ||
+    (text.includes('freighter') && text.includes('not installed'))
+  ) {
+    return 'Freighter wallet extension not found — please install or unlock it and try again'
+  }
+
+  // Wallet signing was cancelled/declined by the user
+  if (
+    text.includes('declined') ||
+    text.includes('denied') ||
+    text.includes('reject') ||
+    text.includes('not allowed') ||
+    text.includes('cancelled') ||
+    text.includes('canceled')
+  ) {
+    return 'You cancelled the request in your wallet — no funds were sent'
+  }
+
+  // Campaign escrow lookup problems — check before the generic network
+  // branch, since these internal messages often also say "failed to fetch"
+  if (text.includes('escrow')) {
+    return "We couldn't verify this campaign's donation address — please try again or contact support"
+  }
+
+  // Fee/simulation estimation problems — same reasoning as above
+  if (text.includes('simulat')) {
+    return 'Unable to estimate the transaction fee right now — please try again in a moment'
+  }
+
+  // Network / connectivity failures (fetch, RPC, DNS, offline, CORS, etc.)
+  if (
+    text.includes('failed to fetch') ||
+    text.includes('network request failed') ||
+    text.includes('networkerror') ||
+    text.includes('net::') ||
+    text.includes('econnrefused') ||
+    text.includes('econnreset') ||
+    text.includes('load failed') ||
+    text.includes('internet') ||
+    text.includes('offline') ||
+    text.includes('fetch failed')
+  ) {
+    return 'Network error — please check your internet connection and try again'
+  }
+
+  // Client-side timeouts distinct from the on-chain poll timeout below
+  if (text.includes('timeout') || text.includes('timed out')) {
+    return 'The request took too long to respond — please check your connection and try again'
+  }
+
+  // Generic fallback — never show raw SDK/XDR text to the user
+  return 'Something went wrong while processing your donation — please try again'
+}
+
 // ---------------------------------------------------------------------------
 // Stroop utilities  (exported so unit tests can import them directly)
 // ---------------------------------------------------------------------------
@@ -245,12 +340,12 @@ async function pollForResult(
       // Try to decode the failure reason
       const resultXdr = (result as SorobanRpc.Api.GetFailedTransactionResponse).resultXdr
       const msg = resultXdr ? decodeResultXdr(resultXdr.toXDR('base64')) : 'Transaction failed on-chain'
-      throw new Error(msg)
+      throw new DonationError(msg)
     }
 
     // status === NOT_FOUND means still in flight — keep polling
   }
-  throw new Error('Transaction timed out — it may still confirm; check your wallet history')
+  throw new DonationError('Transaction timed out — it may still confirm; check your wallet history')
 }
 
 // ---------------------------------------------------------------------------
@@ -386,14 +481,21 @@ export function useDonation(campaignId: string): UseDonationResult {
           )
 
           if (SorobanRpc.Api.isSimulationError(escrowSimResult)) {
-            throw new Error(
-              `Failed to fetch campaign escrow address: ${escrowSimResult.error}`,
+            console.error(
+              '[useDonation] Failed to fetch campaign escrow address:',
+              escrowSimResult.error,
+            )
+            throw new DonationError(
+              "We couldn't verify this campaign's donation address — please try again or contact support",
             )
           }
 
           const escrowResult = escrowSimResult as SorobanRpc.Api.SimulateTransactionSuccessResponse
           if (!escrowResult.result?.retval) {
-            throw new Error('Contract did not return an escrow address')
+            console.error('[useDonation] Contract did not return an escrow address')
+            throw new DonationError(
+              "We couldn't verify this campaign's donation address — please try again or contact support",
+            )
           }
 
           // The contract returns an Address ScVal — extract the string
@@ -413,12 +515,18 @@ export function useDonation(campaignId: string): UseDonationResult {
               )
             } else {
               // Contract address — use it as-is via hex
-              throw new Error(
-                'Escrow address is a contract address, not a Stellar account — unsupported configuration',
+              console.error(
+                '[useDonation] Escrow address is a contract address, not a Stellar account — unsupported configuration',
+              )
+              throw new DonationError(
+                "We couldn't verify this campaign's donation address — please try again or contact support",
               )
             }
           } else {
-            throw new Error('Unexpected return type from get_campaign_escrow')
+            console.error('[useDonation] Unexpected return type from get_campaign_escrow')
+            throw new DonationError(
+              "We couldn't verify this campaign's donation address — please try again or contact support",
+            )
           }
         } catch (escrowErr) {
           // If the contract doesn't exist in the test environment, we still need
@@ -468,7 +576,10 @@ export function useDonation(campaignId: string): UseDonationResult {
         const simResult = await rpc.simulateTransaction(builtTx)
 
         if (SorobanRpc.Api.isSimulationError(simResult)) {
-          throw new Error(`Transaction simulation failed: ${simResult.error}`)
+          console.error('[useDonation] Transaction simulation failed:', simResult.error)
+          throw new DonationError(
+            'Unable to estimate the transaction fee right now — please check your balance and try again',
+          )
         }
 
         const successSim = simResult as SorobanRpc.Api.SimulateTransactionSuccessResponse
@@ -501,14 +612,33 @@ export function useDonation(campaignId: string): UseDonationResult {
         // 12. Sign via Freighter
         // ----------------------------------------------------------------
         const preparedXdr = preparedTx.toEnvelope().toXDR('base64')
-        const signResult = await signTransaction(preparedXdr, {
-          networkPassphrase,
-          address: donorAddress,
-        })
 
-        // signTransaction returns either a string XDR or { signedTxXdr: string }
+        let signResult: Awaited<ReturnType<typeof signTransaction>>
+        try {
+          signResult = await signTransaction(preparedXdr, {
+            networkPassphrase,
+            address: donorAddress,
+          })
+        } catch (signErr) {
+          // Freighter throws directly when the user closes/declines the popup
+          // or the extension is missing/locked — classify rather than leak
+          console.error('[useDonation] signTransaction threw:', signErr)
+          throw new DonationError(classifyDonationError(signErr))
+        }
+
+        // signTransaction returns either a string XDR or { signedTxXdr, error }
+        if (typeof signResult !== 'string' && signResult.error) {
+          console.error('[useDonation] Freighter returned a sign error:', signResult.error)
+          throw new DonationError(classifyDonationError(new Error(String(signResult.error))))
+        }
+
         const signedXdr =
           typeof signResult === 'string' ? signResult : signResult.signedTxXdr
+
+        if (!signedXdr) {
+          console.error('[useDonation] Freighter returned no signed transaction')
+          throw new DonationError('You cancelled the request in your wallet — no funds were sent')
+        }
 
         // ----------------------------------------------------------------
         // 13. Submit
@@ -523,7 +653,7 @@ export function useDonation(campaignId: string): UseDonationResult {
         if (sendResult.status === 'ERROR') {
           const errXdr = sendResult.errorResult?.toXDR('base64')
           const msg = errXdr ? decodeResultXdr(errXdr) : 'Transaction rejected by the network'
-          throw new Error(msg)
+          throw new DonationError(msg)
         }
 
         const txHash = sendResult.hash
@@ -554,10 +684,10 @@ export function useDonation(campaignId: string): UseDonationResult {
           return
         }
 
-        const message =
-          err instanceof Error
-            ? err.message
-            : 'An unexpected error occurred — please try again'
+        // Keep the raw/technical error in the console for debugging, but
+        // never show it to the user — always surface a friendly message.
+        console.error('[useDonation] donation failed:', err)
+        const message = classifyDonationError(err)
 
         setState((s) => ({
           ...s,
