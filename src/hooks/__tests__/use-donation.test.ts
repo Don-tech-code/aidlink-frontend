@@ -11,6 +11,9 @@ import {
   formatFeeXlm,
   buildIdempotencyKey,
   mapResultCode,
+  classifyDonationError,
+  DonationError,
+  WalletNotConnectedError,
 } from '@/hooks/use-donation'
 
 // ---------------------------------------------------------------------------
@@ -224,5 +227,86 @@ describe('stroop round-trip', () => {
   it('round-trips via stroopsToXlm without precision loss for whole XLM', () => {
     const stroops = xlmToStroops(42)
     expect(stroopsToXlm(stroops)).toBe(42)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// classifyDonationError — issue #61: user-friendly failure reasons
+// ---------------------------------------------------------------------------
+
+describe('classifyDonationError', () => {
+  it('passes a DonationError message through unchanged', () => {
+    const err = new DonationError('Insufficient XLM balance for this donation and transaction fee')
+    expect(classifyDonationError(err)).toBe(
+      'Insufficient XLM balance for this donation and transaction fee',
+    )
+  })
+
+  it('gives a connect-wallet message for WalletNotConnectedError', () => {
+    expect(classifyDonationError(new WalletNotConnectedError())).toBe(
+      'Please connect your wallet to continue',
+    )
+  })
+
+  it.each([
+    'User declined access',
+    'Request was rejected by the user',
+    'User cancelled the request',
+    'permission denied',
+  ])('classifies wallet-rejection error "%s" as a cancellation message', (raw) => {
+    expect(classifyDonationError(new Error(raw))).toBe(
+      'You cancelled the request in your wallet — no funds were sent',
+    )
+  })
+
+  it.each([
+    'Failed to fetch',
+    'NetworkError when attempting to fetch resource',
+    'net::ERR_INTERNET_DISCONNECTED',
+    'fetch failed',
+  ])('classifies network error "%s" as a connectivity message', (raw) => {
+    expect(classifyDonationError(new Error(raw))).toBe(
+      'Network error — please check your internet connection and try again',
+    )
+  })
+
+  it('classifies a client-side timeout as a friendly timeout message', () => {
+    expect(classifyDonationError(new Error('The operation timed out'))).toBe(
+      'The request took too long to respond — please check your connection and try again',
+    )
+  })
+
+  it('classifies a missing Freighter extension as an install message', () => {
+    expect(classifyDonationError(new Error('Freighter is not installed'))).toBe(
+      'Freighter wallet extension not found — please install or unlock it and try again',
+    )
+  })
+
+  it('classifies a simulation failure as a fee-estimation message', () => {
+    expect(
+      classifyDonationError(new Error('Transaction simulation failed: HostError: Error(Contract, #4)')),
+    ).toBe('Unable to estimate the transaction fee right now — please try again in a moment')
+  })
+
+  it('classifies an escrow lookup failure as a campaign-address message', () => {
+    expect(classifyDonationError(new Error('Failed to fetch campaign escrow address: XYZ'))).toBe(
+      "We couldn't verify this campaign's donation address — please try again or contact support",
+    )
+  })
+
+  it('never leaks raw XDR/SDK text for unrecognized errors', () => {
+    const raw = 'Bad union switch: 42 at ScVal.address'
+    const result = classifyDonationError(new Error(raw))
+    expect(result).not.toContain('union switch')
+    expect(result).toBe('Something went wrong while processing your donation — please try again')
+  })
+
+  it('handles non-Error thrown values without leaking internals', () => {
+    expect(classifyDonationError('some raw string error')).toBe(
+      'Something went wrong while processing your donation — please try again',
+    )
+    expect(classifyDonationError(undefined)).toBe(
+      'Something went wrong while processing your donation — please try again',
+    )
   })
 })
