@@ -1,3 +1,8 @@
+const createNextIntlPlugin = require('next-intl/plugin')
+
+// Point the plugin at our custom request config location (under `src`).
+const withNextIntl = createNextIntlPlugin('./src/i18n/request.ts')
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -52,4 +57,4 @@ const nextConfig = {
   },
 }
 
-module.exports = nextConfig
+module.exports = withNextIntl(nextConfig)

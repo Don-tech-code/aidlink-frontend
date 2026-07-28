@@ -1,0 +1,11 @@
+{
+  "Metadata": {
+    "title": "AidLink - Plateforme décentralisée d'aide humanitaire",
+    "description": "Distribution d'aide humanitaire transparente, efficace et sécurisée, propulsée par la blockchain Stellar"
+  },
+  "Common": {
+    "appName": "AidLink",
+    "language": "Langue",
+    "loading": "Chargement…"
+  }
+}

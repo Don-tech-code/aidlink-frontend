@@ -1,0 +1,11 @@
+{
+  "Metadata": {
+    "title": "AidLink - منصة المساعدات الإنسانية اللامركزية",
+    "description": "توزيع المساعدات الإنسانية بشفافية وكفاءة وأمان بواسطة بلوكشين Stellar"
+  },
+  "Common": {
+    "appName": "AidLink",
+    "language": "اللغة",
+    "loading": "جارٍ التحميل…"
+  }
+}
