@@ -42,6 +42,7 @@ import {
 // Logger (lightweight — avoids pulling in a third-party log library)
 // ---------------------------------------------------------------------------
 
+/* eslint-disable no-console -- intentional lightweight logger for indexer ops */
 const logger = {
   debug: (msg: string, ctx?: Record<string, unknown>) =>
     process.env.NODE_ENV !== 'test' &&
@@ -53,6 +54,7 @@ const logger = {
   error: (msg: string, ctx?: Record<string, unknown>) =>
     console.error(`[SorobanIndexer] ${msg}`, ctx ?? ''),
 };
+/* eslint-enable no-console */
 
 // ---------------------------------------------------------------------------
 // Cursor type keys

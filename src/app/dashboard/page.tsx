@@ -11,7 +11,7 @@ import { formatAddress, formatAmount } from '@/lib/utils'
 import { DonationChart } from '@/components/features/analytics/donation-chart'
 import { ImpactChart } from '@/components/features/analytics/impact-chart'
 import { CampaignCardSkeleton, StatsCardSkeleton, TableRowSkeleton } from '@/components/features/loading/skeleton-card'
-import { ImpactBadges, getDefaultBadges } from '@/components/features/gamification/impact-badges'
+import { ImpactBadges } from '@/components/features/gamification/impact-badges'
 import { useRealTimeTransactions } from '@/hooks/use-real-time-transactions'
 import { ExportButton } from '@/components/features/export/export-button'
 // ExportButton is now self-contained — no transactions prop needed
@@ -37,8 +37,6 @@ export default function DashboardPage() {
     const timer = setTimeout(() => setIsLoading(false), 1500)
     return () => clearTimeout(timer)
   }, [])
-
-  const badges = getDefaultBadges()
 
   const mockTransactions = [
     {
@@ -315,7 +313,7 @@ export default function DashboardPage() {
           </TabsContent>
 
           <TabsContent value="badges" className="space-y-4">
-            <ImpactBadges badges={badges} />
+            <ImpactBadges />
           </TabsContent>
         </Tabs>
       </main>

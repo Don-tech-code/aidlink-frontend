@@ -134,7 +134,7 @@ export default function CampaignsPage() {
 
         {isError && !isLoading && (
           <div className="text-center py-12">
-            <h3 className="text-xl font-semibold mb-2">Couldn't load campaigns</h3>
+            <h3 className="text-xl font-semibold mb-2">Couldn&apos;t load campaigns</h3>
             <p className="text-muted-foreground">Please try refreshing the page.</p>
           </div>
         )}
