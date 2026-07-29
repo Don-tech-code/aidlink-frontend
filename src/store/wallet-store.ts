@@ -2,9 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { PersistStorage } from 'zustand/middleware'
 import type { WalletState } from '@/types'
-import { encryptedStorage } from '@/lib/store/encrypted-storage'
-
-const SESSION_TTL_MS = 28_800_000
+import { getSorobanSDK } from '@/lib/soroban/sdk'
 
 interface WalletStore extends WalletState {
   connectedAt: number | null
@@ -47,25 +45,14 @@ export const useWalletStore = create<WalletStore>()(
     }),
     {
       name: 'wallet-storage',
-      storage: encryptedStorage as PersistStorage<WalletPersistedState>,
-      partialize: (state): WalletPersistedState => ({
-        isConnected: state.isConnected,
-        address: state.address,
-        network: state.network,
-        connectedAt: state.connectedAt,
-      }),
+      // Previously, if a user last used mainnet, the store would rehydrate
+      // with network: 'mainnet' while the old sorobanSDK singleton stayed
+      // permanently bound to 'testnet' from module import — desyncing the
+      // store and the SDK on every reload after a switch. Pre-warming the
+      // SDK cache for the persisted network here closes that gap.
       onRehydrateStorage: () => (state) => {
-        if (!state) return
-
-        if (state.isConnected && state.connectedAt != null) {
-          if (Date.now() - state.connectedAt > SESSION_TTL_MS) {
-            useWalletStore.getState().disconnect()
-            return
-          }
-        }
-
-        if (state.isConnected && state.address && !state.publicKey) {
-          useWalletStore.setState({ publicKey: state.address })
+        if (state) {
+          getSorobanSDK(state.network)
         }
       },
     }

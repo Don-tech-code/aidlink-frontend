@@ -3,7 +3,7 @@
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { motion } from 'framer-motion'
-import { Heart, Shield, Globe, Zap, Users, TrendingUp, ArrowRight, CheckCircle2 } from 'lucide-react'
+import { Heart, Shield, Globe, Zap, Users, TrendingUp, ArrowRight } from 'lucide-react'
 import Link from 'next/link'
 
 export function LandingPage() {

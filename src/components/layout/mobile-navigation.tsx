@@ -3,7 +3,7 @@
 import { usePathname } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { useWalletStore } from '@/store/wallet-store'
-import { Home, Compass, BarChart3, User, Bell } from 'lucide-react'
+import { Home, Compass, BarChart3, User } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { NotificationCenter } from '@/components/features/notification-center'
 
@@ -44,7 +44,9 @@ export function MobileNavigation() {
         {navItems
           .filter((item) => item.show)
           .map((item) => {
-            const isActive = pathname === item.href
+            const isActive = item.href === '/'
+              ? pathname === item.href
+              : pathname === item.href || pathname.startsWith(item.href + '/')
             return (
               <Button
                 key={item.href}
@@ -56,7 +58,7 @@ export function MobileNavigation() {
                 )}
                 asChild
               >
-                <a href={item.href}>
+                <a href={item.href} aria-current={isActive ? 'page' : undefined}>
                   <item.icon className="h-5 w-5" />
                   <span className="text-xs">{item.label}</span>
                 </a>

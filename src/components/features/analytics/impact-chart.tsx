@@ -39,7 +39,7 @@ export function ImpactChart({ data }: ImpactChartProps) {
               fill="#8884d8"
               dataKey="amount"
             >
-              {data.map((entry, index) => (
+              {data.map((_entry, index) => (
                 <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
               ))}
             </Pie>

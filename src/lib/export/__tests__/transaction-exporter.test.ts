@@ -281,13 +281,12 @@ describe('Streaming CSV memory bound', () => {
     let peakChunkSize = 0
     const originalSlice = Array.prototype.slice
 
-    const sliceSpy = jest
-      .spyOn(transactions, 'slice')
-      .mockImplementation(function (this: ExportedTransaction[], start?: number, end?: number) {
-        const chunk = originalSlice.call(this, start, end) as ExportedTransaction[]
-        if (chunk.length > peakChunkSize) peakChunkSize = chunk.length
-        return chunk
-      })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sliceSpy = jest.spyOn(transactions as any, 'slice').mockImplementation(function (...args: unknown[]) {
+      const chunk = originalSlice.apply(transactions, args as [number?, number?]) as ExportedTransaction[]
+      if (chunk.length > peakChunkSize) peakChunkSize = chunk.length
+      return chunk
+    })
 
     const exporter = new TransactionExporter()
     const result = { transactions, cursor: '', totalFetched: 500 }

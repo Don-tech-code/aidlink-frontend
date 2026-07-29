@@ -5,6 +5,7 @@ import { ThemeProvider } from '@/components/providers/theme-provider'
 import { QueryProvider } from '@/components/providers/query-provider'
 import { Toaster } from '@/components/ui/toaster'
 import { MobileNavigation } from '@/components/layout/mobile-navigation'
+import { NetworkGuard } from '@/components/features/wallet/network-guard'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -24,8 +25,10 @@ export default function RootLayout({
       <body className={inter.className}>
         <ThemeProvider>
           <QueryProvider>
-            {children}
-            <MobileNavigation />
+            <NetworkGuard>
+              {children}
+              <MobileNavigation />
+            </NetworkGuard>
             <Toaster />
           </QueryProvider>
         </ThemeProvider>

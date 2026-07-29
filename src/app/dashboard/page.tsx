@@ -11,7 +11,7 @@ import { formatAddress, formatAmount } from '@/lib/utils'
 import { DonationChart } from '@/components/features/analytics/donation-chart'
 import { ImpactChart } from '@/components/features/analytics/impact-chart'
 import { CampaignCardSkeleton, StatsCardSkeleton, TableRowSkeleton } from '@/components/features/loading/skeleton-card'
-import { ImpactBadges, getDefaultBadges } from '@/components/features/gamification/impact-badges'
+import { ImpactBadges } from '@/components/features/gamification/impact-badges'
 import { useRealTimeTransactions } from '@/hooks/use-real-time-transactions'
 import { ExportButton } from '@/components/features/export/export-button'
 // ExportButton is now self-contained — no transactions prop needed
@@ -20,7 +20,6 @@ import {
   TrendingUp, 
   Wallet, 
   ArrowUpRight, 
-  Clock, 
   CheckCircle2,
   AlertCircle,
   Plus,
@@ -39,8 +38,6 @@ export default function DashboardPage() {
     return () => clearTimeout(timer)
   }, [])
 
-  const badges = getDefaultBadges()
-
   const mockTransactions = [
     {
       id: '1',
@@ -48,7 +45,7 @@ export default function DashboardPage() {
       to: 'Emergency Relief Campaign',
       amount: 500,
       status: 'completed' as const,
-      timestamp: new Date(Date.now() - 3600000).toISOString(),
+      timestamp: new Date(Date.now() - 3600000),
     },
     {
       id: '2',
@@ -56,7 +53,7 @@ export default function DashboardPage() {
       to: 'Medical Supplies Campaign',
       amount: 250,
       status: 'completed' as const,
-      timestamp: new Date(Date.now() - 86400000).toISOString(),
+      timestamp: new Date(Date.now() - 86400000),
     },
     {
       id: '3',
@@ -64,11 +61,11 @@ export default function DashboardPage() {
       to: 'Beneficiary #1234',
       amount: 100,
       status: 'completed' as const,
-      timestamp: new Date(Date.now() - 172800000).toISOString(),
+      timestamp: new Date(Date.now() - 172800000),
     },
   ]
 
-  const transactions = useRealTimeTransactions(mockTransactions)
+  const { transactions } = useRealTimeTransactions(mockTransactions)
 
   if (!isConnected) {
     return (
@@ -158,7 +155,7 @@ export default function DashboardPage() {
               <StatsCardSkeleton />
             </>
           ) : (
-            stats.map((stat, index) => (
+            stats.map((stat) => (
               <Card key={stat.label}>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                   <CardTitle className="text-sm font-medium">{stat.label}</CardTitle>
@@ -297,7 +294,7 @@ export default function DashboardPage() {
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          {new Date(tx.timestamp).toLocaleDateString()}
+                          {tx.timestamp.toLocaleDateString()}
                         </TableCell>
                       </TableRow>
                     ))
@@ -316,7 +313,7 @@ export default function DashboardPage() {
           </TabsContent>
 
           <TabsContent value="badges" className="space-y-4">
-            <ImpactBadges badges={badges} />
+            <ImpactBadges />
           </TabsContent>
         </Tabs>
       </main>

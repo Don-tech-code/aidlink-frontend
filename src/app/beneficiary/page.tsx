@@ -1,241 +1,246 @@
 'use client'
 
-import { Navigation } from '@/components/layout/navigation'
-import { VerificationBanner } from '@/components/beneficiary/VerificationBanner'
-import { VerificationWorkflow } from '@/components/beneficiary/VerificationWorkflow'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import React, { useEffect, useState, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
+import { AlertCircle, Loader2, RefreshCw, ShieldCheck, ShieldOff } from 'lucide-react'
+import { withRequireRole } from '@/components/providers/auth-provider'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { QRCodeSVG } from 'qrcode.react'
-import { Wallet, QrCode, History, CheckCircle2, Clock, AlertCircle } from 'lucide-react'
+import { Skeleton } from '@/components/ui/skeleton'
+import { AllocationCard } from '@/components/beneficiary/AllocationCard'
+import { VerificationBanner } from '@/components/beneficiary/VerificationBanner'
 import { useWalletStore } from '@/store/wallet-store'
-import { formatAddress, formatAmount, formatDate } from '@/lib/utils'
-import type { ProofSubmissionPayload } from '@/components/beneficiary/ProofSubmissionForm'
-import type { Beneficiary } from '@/types'
-import { useState } from 'react'
-import { toast } from 'sonner'
+import { useBeneficiaryStatus } from '@/hooks/use-beneficiary-status'
+import {
+  getContractAllocations,
+  AllocationsContractNotConfiguredError,
+} from '@/lib/beneficiary/allocations'
+import type { Allocation } from '@/types'
 
-export default function BeneficiaryPage() {
-  const { address, balance, isConnected } = useWalletStore()
-  const [showQR, setShowQR] = useState(false)
-  const [beneficiary, setBeneficiary] = useState<Beneficiary>({
-    id: 'beneficiary-current',
-    name: 'Current Beneficiary',
-    walletAddress: address || '',
-    status: 'pending',
-    verificationStatus: 'unverified',
-    campaignId: 'campaign-current',
-    allocatedAmount: 750,
-    claimedAmount: 500,
-    location: {
-      country: 'Nigeria',
-      region: 'Lagos',
-      city: 'Lagos',
-    },
-    createdAt: new Date(Date.now() - 7 * 86400000).toISOString(),
-  })
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
 
-  if (!isConnected) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <AlertCircle className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-          <h2 className="text-2xl font-bold mb-2">Wallet Not Connected</h2>
-          <p className="text-muted-foreground mb-4">Please connect your wallet to access the beneficiary portal</p>
-        </div>
-      </div>
-    )
-  }
+function BeneficiaryPortalPage() {
+  const router = useRouter()
+  const { address, isConnected, network } = useWalletStore()
 
-  const claims = [
-    {
-      id: '1',
-      campaignTitle: 'Emergency Relief for Flood Victims',
-      amount: 500,
-      status: 'completed',
-      claimedAt: new Date(Date.now() - 86400000).toISOString(),
-      txHash: '0x1234...5678',
-    },
-    {
-      id: '2',
-      campaignTitle: 'Medical Supplies for Children',
-      amount: 250,
-      status: 'pending',
-      claimedAt: null,
-      txHash: null,
-    },
-  ]
+  // On-chain verification status
+  const { verificationStatus, isLoading: statusLoading } = useBeneficiaryStatus(address)
 
-  const availableClaims = claims.filter((c) => c.status === 'pending')
-  const completedClaims = claims.filter((c) => c.status === 'completed')
+  // Allocations state
+  const [allocations, setAllocations] = useState<Allocation[]>([])
+  const [allocLoading, setAllocLoading] = useState(false)
+  const [allocError, setAllocError] = useState<string | null>(null)
+  const [contractMissing, setContractMissing] = useState(false)
 
-  const handleClaim = async (_claimId: string) => {
-    try {
-      // Simulate claim process
-      await new Promise((resolve) => setTimeout(resolve, 2000))
-      toast.success('Aid claimed successfully!', {
-        description: 'Your claim has been processed on the blockchain',
-      })
-    } catch {
-      toast.error('Failed to claim aid', {
-        description: 'Please try again later',
-      })
+  // Redirect to /auth when wallet is not connected
+  useEffect(() => {
+    if (!isConnected || !address) {
+      router.replace('/auth')
     }
+  }, [isConnected, address, router])
+
+  // ---------------------------------------------------------------------------
+  // Fetch allocations from the contract
+  // ---------------------------------------------------------------------------
+
+  const fetchAllocations = useCallback(async () => {
+    if (!address) return
+    setAllocLoading(true)
+    setAllocError(null)
+    setContractMissing(false)
+
+    try {
+      const result = await getContractAllocations(address, network)
+      setAllocations(result)
+    } catch (err) {
+      if (err instanceof AllocationsContractNotConfiguredError) {
+        setContractMissing(true)
+        setAllocError(null)
+      } else {
+        setAllocError(
+          err instanceof Error
+            ? err.message
+            : 'Failed to load allocations. Please try again.',
+        )
+      }
+    } finally {
+      setAllocLoading(false)
+    }
+  }, [address, network])
+
+  useEffect(() => {
+    if (address) {
+      fetchAllocations()
+    }
+  }, [address, fetchAllocations])
+
+  // ---------------------------------------------------------------------------
+  // Render helpers
+  // ---------------------------------------------------------------------------
+
+  if (!isConnected || !address) {
+    // The useEffect redirect fires asynchronously — show nothing briefly
+    return null
   }
 
-  const handleSubmitProof = async ({ proof, submittedAt }: ProofSubmissionPayload) => {
-    await new Promise((resolve) => setTimeout(resolve, 1200))
-    setBeneficiary((currentBeneficiary) => ({
-      ...currentBeneficiary,
-      walletAddress: address || currentBeneficiary.walletAddress,
-      status: 'pending',
-      verificationStatus: 'pending',
-      verificationProof: proof,
-      verificationSubmittedAt: submittedAt,
-      verificationReason: undefined,
-      verificationRejectedAt: undefined,
-    }))
-    toast.success('Verification proof submitted', {
-      description: 'Your proof is now under review.',
-    })
-  }
-
-  const isVerified = beneficiary.verificationStatus === 'verified'
+  const isVerified = verificationStatus === 'verified'
+  const unclaimedAllocations = allocations.filter((a) => !a.isClaimed)
+  const claimedAllocations = allocations.filter((a) => a.isClaimed)
 
   return (
-    <div className="min-h-screen bg-background">
-      <Navigation />
-      
-      <main className="container py-8">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-2">Beneficiary Portal</h1>
-          <p className="text-muted-foreground">Claim your allocated aid and track your claim history</p>
+    <div className="container mx-auto max-w-4xl px-4 py-8 space-y-8">
+      {/* ── Header ── */}
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">Beneficiary Portal</h1>
+        <p className="text-muted-foreground mt-1">
+          Manage your aid disbursements. Each QR code below is a signed claim
+          token unique to your wallet.
+        </p>
+      </div>
+
+      {/* ── Verification status banner ── */}
+      {!statusLoading && (
+        <VerificationBanner status={verificationStatus} />
+      )}
+
+      {/* ── Not verified gate ── */}
+      {!statusLoading && !isVerified && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 flex items-start gap-3">
+          <ShieldOff className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" aria-hidden />
+          <div>
+            <p className="font-medium text-amber-900 text-sm">Identity verification required</p>
+            <p className="text-sm text-amber-800 mt-0.5">
+              Your identity must be verified before you can claim aid.{' '}
+              {verificationStatus === 'pending'
+                ? 'Your submission is under review — check back soon.'
+                : 'Submit your proof documents to begin the process.'}
+            </p>
+          </div>
         </div>
+      )}
 
-        {/* Wallet Overview */}
-        <div className="grid gap-6 md:grid-cols-3 mb-8">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Wallet Address</CardTitle>
-              <Wallet className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-sm font-medium">{formatAddress(address || '')}</div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Available Balance</CardTitle>
-              <Wallet className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{formatAmount(balance)} XLM</div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Pending Claims</CardTitle>
-              <Clock className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{availableClaims.length}</div>
-            </CardContent>
-          </Card>
+      {/* ── Verified badge ── */}
+      {!statusLoading && isVerified && (
+        <div className="rounded-lg border border-green-200 bg-green-50 p-3 flex items-center gap-2">
+          <ShieldCheck className="h-5 w-5 text-green-600 shrink-0" aria-hidden />
+          <p className="text-sm font-medium text-green-800">
+            Identity verified — you can claim available aid below.
+          </p>
         </div>
+      )}
 
-        <VerificationBanner status={beneficiary.verificationStatus} rejectionReason={beneficiary.verificationReason} />
-
-        {/* Available Claims */}
-        <div className="mb-8">
-          <h2 className="text-xl font-semibold mb-4">Available Claims</h2>
-          {isVerified ? (
-            availableClaims.length > 0 ? (
-              <div className="grid gap-4 md:grid-cols-2">
-                {availableClaims.map((claim) => (
-                  <Card key={claim.id}>
-                    <CardHeader>
-                      <CardTitle>{claim.campaignTitle}</CardTitle>
-                      <CardDescription>{formatAmount(claim.amount)} XLM available to claim</CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <Button onClick={() => handleClaim(claim.id)} className="w-full" size="lg">
-                        Claim Aid
-                      </Button>
-                      <Button
-                        variant="outline"
-                        onClick={() => setShowQR(!showQR)}
-                        className="w-full"
-                      >
-                        <QrCode className="mr-2 h-4 w-4" />
-                        {showQR ? 'Hide QR Code' : 'Show QR Code'}
-                      </Button>
-                      {showQR && (
-                        <div className="flex justify-center rounded-lg bg-white p-4">
-                          <QRCodeSVG value={address || ''} size={200} />
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
+      {/* ── Allocations section ── */}
+      <section aria-labelledby="allocations-heading">
+        <div className="flex items-center justify-between mb-4">
+          <h2 id="allocations-heading" className="text-lg font-semibold">
+            Available Claims
+          </h2>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={fetchAllocations}
+            disabled={allocLoading}
+            aria-label="Refresh allocations"
+          >
+            {allocLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
             ) : (
-              <Card>
-                <CardContent className="pt-6">
-                  <div className="text-center py-8">
-                    <Clock className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                    <h3 className="text-lg font-semibold mb-2">No Available Claims</h3>
-                    <p className="text-muted-foreground">New approved aid allocations will appear here.</p>
-                  </div>
-                </CardContent>
-              </Card>
-            )
-          ) : (
-            <VerificationWorkflow beneficiary={beneficiary} onSubmitProof={handleSubmitProof} />
-          )}
+              <RefreshCw className="h-4 w-4" aria-hidden />
+            )}
+            <span className="ml-1.5">Refresh</span>
+          </Button>
         </div>
 
-        {/* Claim History */}
-        <div>
-          <h2 className="text-xl font-semibold mb-4">Claim History</h2>
-          {completedClaims.length > 0 ? (
-            <div className="space-y-4">
-              {completedClaims.map((claim) => (
-                <Card key={claim.id}>
-                  <CardContent className="pt-6">
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1">
-                        <div className="font-semibold mb-1">{claim.campaignTitle}</div>
-                        <div className="text-sm text-muted-foreground">
-                          Claimed {formatAmount(claim.amount)} XLM
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          {formatDate(claim.claimedAt || '')}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <Badge className="bg-green-600">Completed</Badge>
-                        <CheckCircle2 className="h-5 w-5 text-green-600" />
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+        {/* Loading skeleton */}
+        {allocLoading && (
+          <div className="grid gap-4 sm:grid-cols-2">
+            {[1, 2].map((n) => (
+              <div key={n} className="space-y-3 rounded-lg border p-4">
+                <Skeleton className="h-4 w-3/4" />
+                <Skeleton className="h-[180px] w-[180px] mx-auto" />
+                <Skeleton className="h-10 w-full" />
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Contract not configured */}
+        {!allocLoading && contractMissing && (
+          <div className="rounded-lg border border-dashed p-8 text-center">
+            <AlertCircle className="mx-auto h-8 w-8 text-muted-foreground mb-3" aria-hidden />
+            <p className="font-medium text-sm">Contract not configured</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              The Beneficiary Registry contract address is not set.
+              Contact your administrator.
+            </p>
+          </div>
+        )}
+
+        {/* Fetch error */}
+        {!allocLoading && allocError && (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-4 flex items-start gap-3">
+            <AlertCircle className="h-5 w-5 text-red-600 mt-0.5 shrink-0" aria-hidden />
+            <div>
+              <p className="font-medium text-red-900 text-sm">Failed to load allocations</p>
+              <p className="text-sm text-red-800 mt-0.5">{allocError}</p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-2"
+                onClick={fetchAllocations}
+              >
+                Try again
+              </Button>
             </div>
-          ) : (
-            <Card>
-              <CardContent className="pt-6">
-                <div className="text-center py-8">
-                  <History className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold mb-2">No Claim History</h3>
-                  <p className="text-muted-foreground">Your claimed aid will appear here</p>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      </main>
+          </div>
+        )}
+
+        {/* Empty state */}
+        {!allocLoading && !allocError && !contractMissing && unclaimedAllocations.length === 0 && (
+          <div className="rounded-lg border border-dashed p-8 text-center">
+            <p className="font-medium text-sm text-muted-foreground">
+              No unclaimed allocations
+            </p>
+            <p className="text-sm text-muted-foreground mt-1">
+              You have no pending aid disbursements at this time.
+            </p>
+          </div>
+        )}
+
+        {/* Unclaimed allocations grid */}
+        {!allocLoading && unclaimedAllocations.length > 0 && (
+          <div className="grid gap-4 sm:grid-cols-2">
+            {unclaimedAllocations.map((allocation) => (
+              <AllocationCard
+                key={allocation.claimId}
+                allocation={allocation}
+                beneficiaryAddress={address}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* ── Claimed allocations ── */}
+      {!allocLoading && claimedAllocations.length > 0 && (
+        <section aria-labelledby="claimed-heading">
+          <h2 id="claimed-heading" className="text-lg font-semibold mb-4">
+            Claimed Aid
+          </h2>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {claimedAllocations.map((allocation) => (
+              <AllocationCard
+                key={allocation.claimId}
+                allocation={allocation}
+                beneficiaryAddress={address}
+              />
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   )
 }
+
+export default withRequireRole(BeneficiaryPortalPage, ['beneficiary', 'admin'])
