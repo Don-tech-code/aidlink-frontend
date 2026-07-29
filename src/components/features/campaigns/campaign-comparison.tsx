@@ -140,7 +140,7 @@ export function CampaignComparison({ campaigns }: CampaignComparisonProps) {
                         <td className="p-3 font-medium">Raised Amount</td>
                         {selectedCampaigns.map((campaign) => (
                           <td key={campaign.id} className="p-3">
-                            {formatAmount(campaign.raisedAmount)} XLM
+                            {formatAmount(campaign.raisedAmount, 2, locale)} XLM
                           </td>
                         ))}
                       </tr>
