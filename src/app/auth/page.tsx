@@ -83,7 +83,7 @@ export default function AuthPage() {
                 <>Connecting...</>
               ) : (
                 <>
-                  <Wallet className="mr-2 h-5 w-5" />
+                  <Wallet className="me-2 h-5 w-5" />
                   Connect with Stellar Wallet
                 </>
               )}
@@ -107,7 +107,7 @@ export default function AuthPage() {
                 disabled={isConnecting}
                 onClick={() => handleConnectWallet('freighter')}
               >
-                <Shield className="mr-2 h-4 w-4" />
+                <Shield className="me-2 h-4 w-4" />
                 Freighter
               </Button>
               <Button 
@@ -116,7 +116,7 @@ export default function AuthPage() {
                 disabled={isConnecting}
                 onClick={() => handleConnectWallet('rabet')}
               >
-                <Shield className="mr-2 h-4 w-4" />
+                <Shield className="me-2 h-4 w-4" />
                 Rabet
               </Button>
               <Button 
@@ -125,7 +125,7 @@ export default function AuthPage() {
                 disabled={isConnecting}
                 onClick={() => handleConnectWallet('xbull')}
               >
-                <Shield className="mr-2 h-4 w-4" />
+                <Shield className="me-2 h-4 w-4" />
                 XBull
               </Button>
             </div>
