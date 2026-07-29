@@ -8,6 +8,7 @@ import { Progress } from '@/components/ui/progress'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { GitCompare, X, Check } from 'lucide-react'
 import { formatAmount, calculateCampaignProgress } from '@/lib/utils'
+import { useLocale } from 'next-intl'
 
 export interface Campaign {
   id: string
@@ -25,6 +26,7 @@ interface CampaignComparisonProps {
 }
 
 export function CampaignComparison({ campaigns }: CampaignComparisonProps) {
+  const locale = useLocale()
   const [isOpen, setIsOpen] = useState(false)
   const [selectedCampaigns, setSelectedCampaigns] = useState<Campaign[]>([])
 
@@ -130,7 +132,7 @@ export function CampaignComparison({ campaigns }: CampaignComparisonProps) {
                         <td className="p-3 font-medium">Target Amount</td>
                         {selectedCampaigns.map((campaign) => (
                           <td key={campaign.id} className="p-3">
-                            {formatAmount(campaign.targetAmount)} XLM
+                            {formatAmount(campaign.targetAmount, 2, locale)} XLM
                           </td>
                         ))}
                       </tr>

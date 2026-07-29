@@ -1,14 +1,17 @@
 'use client';
 
 import { useState } from 'react';
+import { useLocale } from 'next-intl';
 import { useDonations } from '@/hooks/use-donations';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { formatDate } from '@/lib/utils';
 
 export function DonationTracker({ campaignId }: { campaignId: string }) {
+  const locale = useLocale();
   const { donations, loading, error, trackDonation, refresh } = useDonations(campaignId);
   const [amount, setAmount] = useState('');
 
@@ -65,7 +68,7 @@ export function DonationTracker({ campaignId }: { campaignId: string }) {
                 <TableRow key={donation.id}>
                   <TableCell className="font-mono">{donation.donor.slice(0, 8)}...</TableCell>
                   <TableCell>{donation.amount} XLM</TableCell>
-                  <TableCell>{new Date(donation.timestamp).toLocaleDateString()}</TableCell>
+                  <TableCell>{formatDate(donation.timestamp, locale)}</TableCell>
                   <TableCell className="font-mono">{donation.transactionHash.slice(0, 10)}...</TableCell>
                 </TableRow>
               ))}

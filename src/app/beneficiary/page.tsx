@@ -10,12 +10,14 @@ import { QRCodeSVG } from 'qrcode.react'
 import { Wallet, QrCode, History, CheckCircle2, Clock, AlertCircle } from 'lucide-react'
 import { useWalletStore } from '@/store/wallet-store'
 import { formatAddress, formatAmount, formatDate } from '@/lib/utils'
+import { useLocale } from 'next-intl'
 import type { ProofSubmissionPayload } from '@/components/beneficiary/ProofSubmissionForm'
 import type { Beneficiary } from '@/types'
 import { useState } from 'react'
 import { toast } from 'sonner'
 
 export default function BeneficiaryPage() {
+  const locale = useLocale()
   const { address, balance, isConnected } = useWalletStore()
   const [showQR, setShowQR] = useState(false)
   const [beneficiary, setBeneficiary] = useState<Beneficiary>({
@@ -130,7 +132,7 @@ export default function BeneficiaryPage() {
               <Wallet className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{formatAmount(balance)} XLM</div>
+              <div className="text-2xl font-bold">{formatAmount(balance, 2, locale)} XLM</div>
             </CardContent>
           </Card>
 
@@ -157,7 +159,7 @@ export default function BeneficiaryPage() {
                   <Card key={claim.id}>
                     <CardHeader>
                       <CardTitle>{claim.campaignTitle}</CardTitle>
-                      <CardDescription>{formatAmount(claim.amount)} XLM available to claim</CardDescription>
+                      <CardDescription>{formatAmount(claim.amount, 2, locale)} XLM available to claim</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
                       <Button onClick={() => handleClaim(claim.id)} className="w-full" size="lg">
@@ -208,10 +210,10 @@ export default function BeneficiaryPage() {
                       <div className="flex-1">
                         <div className="font-semibold mb-1">{claim.campaignTitle}</div>
                         <div className="text-sm text-muted-foreground">
-                          Claimed {formatAmount(claim.amount)} XLM
+                          Claimed {formatAmount(claim.amount, 2, locale)} XLM
                         </div>
                         <div className="text-sm text-muted-foreground">
-                          {formatDate(claim.claimedAt || '')}
+                          {formatDate(claim.claimedAt || '', locale)}
                         </div>
                       </div>
                       <div className="flex items-center gap-4">

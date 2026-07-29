@@ -12,9 +12,11 @@ import { CampaignComparison } from '@/components/features/campaigns/campaign-com
 import { Search, Heart, TrendingUp, Clock } from 'lucide-react'
 import { useState, useMemo } from 'react'
 import Link from 'next/link'
-import { formatAmount, calculateCampaignProgress } from '@/lib/utils'
+import { formatAmount, formatDate, calculateCampaignProgress } from '@/lib/utils'
+import { useLocale } from 'next-intl'
 
 export default function CampaignsPage() {
+  const locale = useLocale()
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('all')
   const [filters, setFilters] = useState<CampaignFiltersType>({
@@ -216,7 +218,7 @@ export default function CampaignsPage() {
                     <div className="flex justify-between text-sm mb-2">
                       <span className="text-muted-foreground">Progress</span>
                       <span className="font-medium">
-                        {formatAmount(campaign.raisedAmount)} / {formatAmount(campaign.targetAmount)} XLM
+                        {formatAmount(campaign.raisedAmount, 2, locale)} / {formatAmount(campaign.targetAmount, 2, locale)} XLM
                       </span>
                     </div>
                     <div className="w-full bg-secondary h-2 rounded-full overflow-hidden">
@@ -236,7 +238,7 @@ export default function CampaignsPage() {
                     </div>
                     <div className="flex items-center gap-2 text-muted-foreground">
                       <Clock className="h-4 w-4" />
-                      <span>Ends {new Date(campaign.endDate).toLocaleDateString()}</span>
+                      <span>Ends {formatDate(campaign.endDate, locale)}</span>
                     </div>
                   </div>
                 </div>

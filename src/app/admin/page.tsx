@@ -21,8 +21,10 @@ import {
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { formatAddress, formatAmount, formatDate } from '@/lib/utils'
+import { useLocale } from 'next-intl'
 
 export default function AdminPage() {
+  const locale = useLocale()
   const [searchQuery, setSearchQuery] = useState('')
 
   const pendingBeneficiaries = [
@@ -172,7 +174,7 @@ export default function AdminPage() {
                       <TableCell>{formatAddress(beneficiary.walletAddress)}</TableCell>
                       <TableCell>{beneficiary.location}</TableCell>
                       <TableCell>{beneficiary.documents}</TableCell>
-                      <TableCell>{formatDate(beneficiary.submittedAt)}</TableCell>
+                      <TableCell>{formatDate(beneficiary.submittedAt, locale)}</TableCell>
                       <TableCell>
                         <div className="flex gap-2">
                           <Button
@@ -207,7 +209,7 @@ export default function AdminPage() {
                           By {campaign.organizer}
                         </div>
                         <div className="flex items-center gap-4 text-sm">
-                          <span>{formatAmount(campaign.raisedAmount)} / {formatAmount(campaign.targetAmount)} XLM</span>
+                          <span>{formatAmount(campaign.raisedAmount, 2, locale)} / {formatAmount(campaign.targetAmount, 2, locale)} XLM</span>
                           <Badge variant="secondary">{campaign.status}</Badge>
                         </div>
                       </div>
@@ -247,7 +249,7 @@ export default function AdminPage() {
                       <TableCell>
                         <Badge variant="destructive">{user.flagReason}</Badge>
                       </TableCell>
-                      <TableCell>{formatDate(user.flaggedAt)}</TableCell>
+                      <TableCell>{formatDate(user.flaggedAt, locale)}</TableCell>
                       <TableCell>
                         <div className="flex gap-2">
                           <Button

@@ -7,7 +7,8 @@ import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useWalletStore } from '@/store/wallet-store'
-import { formatAddress, formatAmount } from '@/lib/utils'
+import { formatAddress, formatAmount, formatDate } from '@/lib/utils'
+import { useLocale } from 'next-intl'
 import { DonationChart } from '@/components/features/analytics/donation-chart'
 import { ImpactChart } from '@/components/features/analytics/impact-chart'
 import { CampaignCardSkeleton, StatsCardSkeleton, TableRowSkeleton } from '@/components/features/loading/skeleton-card'
@@ -29,6 +30,7 @@ import Link from 'next/link'
 import { useState, useEffect } from 'react'
 
 export default function DashboardPage() {
+  const locale = useLocale()
   const { address, balance, isConnected } = useWalletStore()
   const [isLoading, setIsLoading] = useState(true)
 
@@ -130,7 +132,7 @@ export default function DashboardPage() {
 
   const stats = [
     { label: 'Total Donated', value: '$750', icon: Heart, change: '+12%' },
-    { label: 'Wallet Balance', value: `${formatAmount(balance)} XLM`, icon: Wallet, change: '+5%' },
+    { label: 'Wallet Balance', value: `${formatAmount(balance, 2, locale)} XLM`, icon: Wallet, change: '+5%' },
     { label: 'Campaigns Supported', value: '3', icon: TrendingUp, change: '+1' },
     { label: 'Impact Score', value: '850', icon: CheckCircle2, change: '+25' },
   ]
@@ -208,7 +210,7 @@ export default function DashboardPage() {
                         <Badge variant="secondary">{campaign.category}</Badge>
                       </div>
                       <CardDescription>
-                        {formatAmount(campaign.raisedAmount)} of {formatAmount(campaign.targetAmount)} XLM raised
+                        {formatAmount(campaign.raisedAmount, 2, locale)} of {formatAmount(campaign.targetAmount, 2, locale)} XLM raised
                       </CardDescription>
                     </CardHeader>
                     <CardContent>
@@ -289,14 +291,14 @@ export default function DashboardPage() {
                       <TableRow key={tx.id} className="animate-in fade-in slide-in-from-top-2 duration-300">
                         <TableCell className="capitalize">{tx.type}</TableCell>
                         <TableCell>{tx.to}</TableCell>
-                        <TableCell>{formatAmount(tx.amount)} XLM</TableCell>
+                        <TableCell>{formatAmount(tx.amount, 2, locale)} XLM</TableCell>
                         <TableCell>
                           <Badge variant="outline" className="text-green-600 border-green-600">
                             {tx.status}
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          {new Date(tx.timestamp).toLocaleDateString()}
+                          {formatDate(tx.timestamp, locale)}
                         </TableCell>
                       </TableRow>
                     ))

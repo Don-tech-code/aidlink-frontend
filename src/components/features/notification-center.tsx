@@ -15,8 +15,13 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Bell, Check, CheckCheck, Trash2, X } from 'lucide-react'
 import { useNotificationStore } from '@/store/notification-store'
 import { formatDistanceToNow } from 'date-fns'
+import { enUS, ar, fr, type Locale as DateFnsLocale } from 'date-fns/locale'
+import { useLocale } from 'next-intl'
+
+const dateFnsLocales: Record<string, DateFnsLocale> = { en: enUS, ar, fr }
 
 export function NotificationCenter() {
+  const locale = useLocale()
   const { notifications, unreadCount, markAsRead, markAllAsRead, removeNotification } =
     useNotificationStore()
   const [isOpen, setIsOpen] = useState(false)
@@ -133,7 +138,10 @@ export function NotificationCenter() {
                         {notification.message}
                       </p>
                       <p className="text-xs text-muted-foreground mt-1">
-                        {formatDistanceToNow(new Date(notification.timestamp), { addSuffix: true })}
+                        {formatDistanceToNow(new Date(notification.timestamp), {
+                          addSuffix: true,
+                          locale: dateFnsLocales[locale] ?? enUS,
+                        })}
                       </p>
                     </div>
                     <Button

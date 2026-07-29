@@ -9,6 +9,8 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Download, FileSpreadsheet, FileText } from 'lucide-react'
 import { toast } from 'sonner'
+import { useLocale } from 'next-intl'
+import { formatDate } from '@/lib/utils'
 
 export interface Transaction {
   id: string
@@ -25,6 +27,8 @@ interface ExportButtonProps {
 }
 
 export function ExportButton({ transactions, filename = 'donation-history' }: ExportButtonProps) {
+  const locale = useLocale()
+
   const exportToCSV = () => {
     if (transactions.length === 0) {
       toast.error('No transactions to export')
@@ -38,7 +42,7 @@ export function ExportButton({ transactions, filename = 'donation-history' }: Ex
       tx.to,
       tx.amount.toString(),
       tx.status,
-      new Date(tx.timestamp).toLocaleDateString(),
+      formatDate(tx.timestamp, locale),
     ])
 
     const csvContent = [
