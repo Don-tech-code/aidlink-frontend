@@ -6,6 +6,134 @@
   "Common": {
     "appName": "AidLink",
     "language": "Language",
-    "loading": "Loading…"
+    "loading": "Loading…",
+    "connectWallet": "Connect Wallet",
+    "getStarted": "Get Started",
+    "viewCampaigns": "View Campaigns",
+    "viewAll": "View All",
+    "details": "Details"
+  },
+  "Nav": {
+    "campaigns": "Campaigns",
+    "about": "About",
+    "dashboard": "Dashboard",
+    "theme": "Theme",
+    "connectWallet": "Connect Wallet",
+    "toggleMenu": "Toggle menu"
+  },
+  "Landing": {
+    "nav": {
+      "connectWallet": "Connect Wallet",
+      "getStarted": "Get Started"
+    },
+    "hero": {
+      "titleLead": "Transforming Humanitarian Aid with",
+      "titleHighlight": "Blockchain Technology",
+      "subtitle": "Transparent, efficient, and secure aid distribution powered by Stellar. Every donation makes a real impact, tracked on the blockchain.",
+      "startDonating": "Start Donating",
+      "viewCampaigns": "View Campaigns"
+    },
+    "stats": {
+      "totalDonations": "Total Donations",
+      "activeCampaigns": "Active Campaigns",
+      "beneficiariesHelped": "Beneficiaries Helped",
+      "ngoPartners": "NGO Partners"
+    },
+    "features": {
+      "heading": "Why Choose AidLink?",
+      "subtitle": "Built on Stellar blockchain to ensure transparency, speed, and security in aid distribution.",
+      "transparent": {
+        "title": "Transparent Transactions",
+        "description": "Every donation is tracked on the Stellar blockchain, ensuring complete transparency and accountability."
+      },
+      "instant": {
+        "title": "Instant Settlement",
+        "description": "Funds reach beneficiaries in seconds, not days, eliminating delays in emergency situations."
+      },
+      "global": {
+        "title": "Global Reach",
+        "description": "Borderless aid distribution with support for multiple currencies and regions worldwide."
+      },
+      "direct": {
+        "title": "Direct Impact",
+        "description": "Donors can see exactly how their contributions are making a difference in real-time."
+      }
+    },
+    "cta": {
+      "heading": "Ready to Make a Difference?",
+      "subtitle": "Join thousands of donors and NGOs already using AidLink to transform humanitarian aid.",
+      "connectWallet": "Connect Your Wallet",
+      "registerNgo": "Register as NGO"
+    },
+    "footer": {
+      "about": "About",
+      "privacy": "Privacy",
+      "terms": "Terms",
+      "contact": "Contact",
+      "copyright": "© 2026 AidLink. Built on Stellar."
+    }
+  },
+  "Auth": {
+    "title": "Connect Your Wallet",
+    "subtitle": "Connect your Stellar wallet to access the AidLink platform",
+    "chooseWallet": "Choose Wallet",
+    "chooseWalletDescription": "Select your preferred wallet to connect",
+    "connecting": "Connecting...",
+    "connectWithStellar": "Connect with Stellar Wallet",
+    "orContinueWith": "Or continue with",
+    "benefits": {
+      "secure": "Secure connection with Stellar blockchain",
+      "privateKeys": "Your private keys never leave your device",
+      "transparent": "Transparent and trackable transactions"
+    },
+    "testnet": {
+      "title": "Testnet Mode",
+      "description": "Currently connected to Stellar Testnet. No real funds are used."
+    },
+    "toast": {
+      "successTitle": "Wallet connected successfully!",
+      "successDescription": "Connected to {address}",
+      "errorTitle": "Failed to connect wallet",
+      "errorDescription": "Please make sure Freighter is installed and try again"
+    }
+  },
+  "Dashboard": {
+    "notConnected": {
+      "title": "Wallet Not Connected",
+      "description": "Please connect your wallet to access the dashboard",
+      "connectWallet": "Connect Wallet"
+    },
+    "title": "Dashboard",
+    "welcome": "Welcome back! Your wallet: {address}",
+    "stats": {
+      "totalDonated": "Total Donated",
+      "walletBalance": "Wallet Balance",
+      "campaignsSupported": "Campaigns Supported",
+      "impactScore": "Impact Score",
+      "fromLastMonth": "from last month"
+    },
+    "tabs": {
+      "campaigns": "Campaigns",
+      "transactions": "Transactions",
+      "analytics": "Analytics",
+      "badges": "Badges"
+    },
+    "activeCampaigns": "Active Campaigns",
+    "raised": "{raised} of {target} XLM raised",
+    "funded": "{percent}% funded",
+    "startCampaign": {
+      "title": "Start Your Own Campaign",
+      "description": "Create a campaign to help those in need",
+      "action": "Create Campaign"
+    },
+    "recentTransactions": "Recent Transactions",
+    "table": {
+      "type": "Type",
+      "to": "To",
+      "amount": "Amount",
+      "status": "Status",
+      "date": "Date"
+    },
+    "impactAnalytics": "Your Impact Analytics"
   }
 }

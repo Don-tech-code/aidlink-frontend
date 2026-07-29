@@ -7,11 +7,13 @@ import { ThemeToggle } from '@/components/features/theme/theme-toggle'
 import { Wallet, LogOut, Menu, X } from 'lucide-react'
 import { useState } from 'react'
 import Link from 'next/link'
+import { useTranslations } from 'next-intl'
 import { formatAddress } from '@/lib/utils'
 
 export function Navigation() {
   const { isConnected, address, disconnect } = useWalletStore()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const t = useTranslations('Nav')
 
   return (
     <nav className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">

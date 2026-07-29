@@ -6,6 +6,134 @@
   "Common": {
     "appName": "AidLink",
     "language": "Langue",
-    "loading": "Chargement…"
+    "loading": "Chargement…",
+    "connectWallet": "Connecter le portefeuille",
+    "getStarted": "Commencer",
+    "viewCampaigns": "Voir les campagnes",
+    "viewAll": "Tout voir",
+    "details": "Détails"
+  },
+  "Nav": {
+    "campaigns": "Campagnes",
+    "about": "À propos",
+    "dashboard": "Tableau de bord",
+    "theme": "Thème",
+    "connectWallet": "Connecter le portefeuille",
+    "toggleMenu": "Basculer le menu"
+  },
+  "Landing": {
+    "nav": {
+      "connectWallet": "Connecter le portefeuille",
+      "getStarted": "Commencer"
+    },
+    "hero": {
+      "titleLead": "Transformer l'aide humanitaire grâce à la",
+      "titleHighlight": "technologie blockchain",
+      "subtitle": "Distribution d'aide transparente, efficace et sécurisée, propulsée par Stellar. Chaque don a un impact réel, suivi sur la blockchain.",
+      "startDonating": "Commencer à faire un don",
+      "viewCampaigns": "Voir les campagnes"
+    },
+    "stats": {
+      "totalDonations": "Total des dons",
+      "activeCampaigns": "Campagnes actives",
+      "beneficiariesHelped": "Bénéficiaires aidés",
+      "ngoPartners": "ONG partenaires"
+    },
+    "features": {
+      "heading": "Pourquoi choisir AidLink ?",
+      "subtitle": "Construit sur la blockchain Stellar pour garantir la transparence, la rapidité et la sécurité de la distribution de l'aide.",
+      "transparent": {
+        "title": "Transactions transparentes",
+        "description": "Chaque don est suivi sur la blockchain Stellar, garantissant une transparence et une responsabilité totales."
+      },
+      "instant": {
+        "title": "Règlement instantané",
+        "description": "Les fonds parviennent aux bénéficiaires en quelques secondes, et non en quelques jours, éliminant les retards en situation d'urgence."
+      },
+      "global": {
+        "title": "Portée mondiale",
+        "description": "Distribution d'aide sans frontières avec prise en charge de plusieurs devises et régions à travers le monde."
+      },
+      "direct": {
+        "title": "Impact direct",
+        "description": "Les donateurs peuvent voir exactement comment leurs contributions font la différence en temps réel."
+      }
+    },
+    "cta": {
+      "heading": "Prêt à faire la différence ?",
+      "subtitle": "Rejoignez des milliers de donateurs et d'ONG qui utilisent déjà AidLink pour transformer l'aide humanitaire.",
+      "connectWallet": "Connectez votre portefeuille",
+      "registerNgo": "S'inscrire en tant qu'ONG"
+    },
+    "footer": {
+      "about": "À propos",
+      "privacy": "Confidentialité",
+      "terms": "Conditions",
+      "contact": "Contact",
+      "copyright": "© 2026 AidLink. Construit sur Stellar."
+    }
+  },
+  "Auth": {
+    "title": "Connectez votre portefeuille",
+    "subtitle": "Connectez votre portefeuille Stellar pour accéder à la plateforme AidLink",
+    "chooseWallet": "Choisir un portefeuille",
+    "chooseWalletDescription": "Sélectionnez votre portefeuille préféré pour vous connecter",
+    "connecting": "Connexion...",
+    "connectWithStellar": "Connecter avec un portefeuille Stellar",
+    "orContinueWith": "Ou continuer avec",
+    "benefits": {
+      "secure": "Connexion sécurisée avec la blockchain Stellar",
+      "privateKeys": "Vos clés privées ne quittent jamais votre appareil",
+      "transparent": "Transactions transparentes et traçables"
+    },
+    "testnet": {
+      "title": "Mode Testnet",
+      "description": "Actuellement connecté au Testnet de Stellar. Aucun fonds réel n'est utilisé."
+    },
+    "toast": {
+      "successTitle": "Portefeuille connecté avec succès !",
+      "successDescription": "Connecté à {address}",
+      "errorTitle": "Échec de la connexion du portefeuille",
+      "errorDescription": "Veuillez vous assurer que Freighter est installé et réessayer"
+    }
+  },
+  "Dashboard": {
+    "notConnected": {
+      "title": "Portefeuille non connecté",
+      "description": "Veuillez connecter votre portefeuille pour accéder au tableau de bord",
+      "connectWallet": "Connecter le portefeuille"
+    },
+    "title": "Tableau de bord",
+    "welcome": "Bon retour ! Votre portefeuille : {address}",
+    "stats": {
+      "totalDonated": "Total des dons",
+      "walletBalance": "Solde du portefeuille",
+      "campaignsSupported": "Campagnes soutenues",
+      "impactScore": "Score d'impact",
+      "fromLastMonth": "par rapport au mois dernier"
+    },
+    "tabs": {
+      "campaigns": "Campagnes",
+      "transactions": "Transactions",
+      "analytics": "Analyses",
+      "badges": "Badges"
+    },
+    "activeCampaigns": "Campagnes actives",
+    "raised": "{raised} sur {target} XLM collectés",
+    "funded": "{percent} % financé",
+    "startCampaign": {
+      "title": "Lancez votre propre campagne",
+      "description": "Créez une campagne pour aider ceux qui en ont besoin",
+      "action": "Créer une campagne"
+    },
+    "recentTransactions": "Transactions récentes",
+    "table": {
+      "type": "Type",
+      "to": "À",
+      "amount": "Montant",
+      "status": "Statut",
+      "date": "Date"
+    },
+    "impactAnalytics": "Vos analyses d'impact"
   }
 }

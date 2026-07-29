@@ -6,6 +6,134 @@
   "Common": {
     "appName": "AidLink",
     "language": "اللغة",
-    "loading": "جارٍ التحميل…"
+    "loading": "جارٍ التحميل…",
+    "connectWallet": "ربط المحفظة",
+    "getStarted": "ابدأ الآن",
+    "viewCampaigns": "عرض الحملات",
+    "viewAll": "عرض الكل",
+    "details": "التفاصيل"
+  },
+  "Nav": {
+    "campaigns": "الحملات",
+    "about": "حول",
+    "dashboard": "لوحة التحكم",
+    "theme": "المظهر",
+    "connectWallet": "ربط المحفظة",
+    "toggleMenu": "تبديل القائمة"
+  },
+  "Landing": {
+    "nav": {
+      "connectWallet": "ربط المحفظة",
+      "getStarted": "ابدأ الآن"
+    },
+    "hero": {
+      "titleLead": "تحويل المساعدات الإنسانية باستخدام",
+      "titleHighlight": "تقنية البلوكشين",
+      "subtitle": "توزيع مساعدات شفاف وفعّال وآمن مدعوم بشبكة Stellar. كل تبرع يُحدث أثرًا حقيقيًا، يتم تتبعه على البلوكشين.",
+      "startDonating": "ابدأ التبرع",
+      "viewCampaigns": "عرض الحملات"
+    },
+    "stats": {
+      "totalDonations": "إجمالي التبرعات",
+      "activeCampaigns": "الحملات النشطة",
+      "beneficiariesHelped": "المستفيدون الذين تمت مساعدتهم",
+      "ngoPartners": "المنظمات الشريكة"
+    },
+    "features": {
+      "heading": "لماذا تختار AidLink؟",
+      "subtitle": "مبنية على بلوكشين Stellar لضمان الشفافية والسرعة والأمان في توزيع المساعدات.",
+      "transparent": {
+        "title": "معاملات شفافة",
+        "description": "يتم تتبع كل تبرع على بلوكشين Stellar، مما يضمن الشفافية والمساءلة الكاملة."
+      },
+      "instant": {
+        "title": "تسوية فورية",
+        "description": "تصل الأموال إلى المستفيدين في ثوانٍ وليس أيامًا، مما يلغي التأخير في حالات الطوارئ."
+      },
+      "global": {
+        "title": "انتشار عالمي",
+        "description": "توزيع مساعدات بلا حدود مع دعم لعملات ومناطق متعددة حول العالم."
+      },
+      "direct": {
+        "title": "أثر مباشر",
+        "description": "يمكن للمتبرعين رؤية كيفية إحداث مساهماتهم فرقًا في الوقت الفعلي بالضبط."
+      }
+    },
+    "cta": {
+      "heading": "هل أنت مستعد لإحداث فرق؟",
+      "subtitle": "انضم إلى آلاف المتبرعين والمنظمات غير الحكومية الذين يستخدمون AidLink بالفعل لتحويل المساعدات الإنسانية.",
+      "connectWallet": "اربط محفظتك",
+      "registerNgo": "التسجيل كمنظمة"
+    },
+    "footer": {
+      "about": "حول",
+      "privacy": "الخصوصية",
+      "terms": "الشروط",
+      "contact": "اتصل بنا",
+      "copyright": "© 2026 AidLink. مبني على Stellar."
+    }
+  },
+  "Auth": {
+    "title": "اربط محفظتك",
+    "subtitle": "اربط محفظة Stellar الخاصة بك للوصول إلى منصة AidLink",
+    "chooseWallet": "اختر المحفظة",
+    "chooseWalletDescription": "حدّد المحفظة المفضلة لديك للاتصال",
+    "connecting": "جارٍ الاتصال...",
+    "connectWithStellar": "الاتصال بمحفظة Stellar",
+    "orContinueWith": "أو تابع باستخدام",
+    "benefits": {
+      "secure": "اتصال آمن مع بلوكشين Stellar",
+      "privateKeys": "لا تغادر مفاتيحك الخاصة جهازك أبدًا",
+      "transparent": "معاملات شفافة وقابلة للتتبع"
+    },
+    "testnet": {
+      "title": "وضع الشبكة التجريبية",
+      "description": "متصل حاليًا بشبكة Stellar التجريبية. لا تُستخدم أموال حقيقية."
+    },
+    "toast": {
+      "successTitle": "تم ربط المحفظة بنجاح!",
+      "successDescription": "تم الاتصال بـ {address}",
+      "errorTitle": "فشل ربط المحفظة",
+      "errorDescription": "يرجى التأكد من تثبيت Freighter والمحاولة مرة أخرى"
+    }
+  },
+  "Dashboard": {
+    "notConnected": {
+      "title": "المحفظة غير متصلة",
+      "description": "يرجى ربط محفظتك للوصول إلى لوحة التحكم",
+      "connectWallet": "ربط المحفظة"
+    },
+    "title": "لوحة التحكم",
+    "welcome": "مرحبًا بعودتك! محفظتك: {address}",
+    "stats": {
+      "totalDonated": "إجمالي التبرعات",
+      "walletBalance": "رصيد المحفظة",
+      "campaignsSupported": "الحملات المدعومة",
+      "impactScore": "نقاط الأثر",
+      "fromLastMonth": "مقارنة بالشهر الماضي"
+    },
+    "tabs": {
+      "campaigns": "الحملات",
+      "transactions": "المعاملات",
+      "analytics": "التحليلات",
+      "badges": "الشارات"
+    },
+    "activeCampaigns": "الحملات النشطة",
+    "raised": "تم جمع {raised} من {target} XLM",
+    "funded": "تم تمويل {percent}%",
+    "startCampaign": {
+      "title": "ابدأ حملتك الخاصة",
+      "description": "أنشئ حملة لمساعدة المحتاجين",
+      "action": "إنشاء حملة"
+    },
+    "recentTransactions": "المعاملات الأخيرة",
+    "table": {
+      "type": "النوع",
+      "to": "إلى",
+      "amount": "المبلغ",
+      "status": "الحالة",
+      "date": "التاريخ"
+    },
+    "impactAnalytics": "تحليلات أثرك"
   }
 }
