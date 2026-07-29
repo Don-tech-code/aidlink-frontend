@@ -1,48 +1,255 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Horizon } from '@stellar/stellar-sdk'
 import { useNotificationStore } from '@/store/notification-store'
+import { useWalletStore } from '@/store/wallet-store'
+import { computeBackoffMs } from '@/lib/horizon/backoff'
+import { BoundedFifoSet } from '@/lib/horizon/bounded-fifo-set'
+import {
+  decodeHorizonTransaction,
+  type HorizonTransactionRecord,
+  type RealtimeTransaction,
+} from '@/lib/horizon/decode-horizon-transaction'
+import {
+  cursorStorageKey,
+  getHorizonUrl,
+  type HorizonNetwork,
+} from '@/lib/horizon/network'
 
-export interface Transaction {
-  id: string
-  type: 'donation' | 'distribution' | 'refund'
-  to: string
-  amount: number
-  status: 'pending' | 'completed' | 'failed'
-  timestamp: Date
+/** @deprecated Prefer RealtimeTransaction — kept for existing imports. */
+export type Transaction = RealtimeTransaction
+
+export interface UseRealTimeTransactionsResult {
+  transactions: RealtimeTransaction[]
+  isConnected: boolean
+  error: string | null
 }
 
-export function useRealTimeTransactions(initialTransactions: Transaction[]) {
-  const [transactions, setTransactions] = useState<Transaction[]>(initialTransactions)
-  const { addNotification } = useNotificationStore()
+export const MAX_VISIBLE_TRANSACTIONS = 50
+export const DEDUPE_CAPACITY = 200
+
+function readCursor(publicKey: string, network: HorizonNetwork): string {
+  if (typeof sessionStorage === 'undefined') {
+    return 'now'
+  }
+  return sessionStorage.getItem(cursorStorageKey(publicKey, network)) || 'now'
+}
+
+function writeCursor(
+  publicKey: string,
+  network: HorizonNetwork,
+  cursor: string
+): void {
+  if (typeof sessionStorage === 'undefined') {
+    return
+  }
+  sessionStorage.setItem(cursorStorageKey(publicKey, network), cursor)
+}
+
+function clearCursor(publicKey: string, network: HorizonNetwork): void {
+  if (typeof sessionStorage === 'undefined') {
+    return
+  }
+  sessionStorage.removeItem(cursorStorageKey(publicKey, network))
+}
+
+/**
+ * Live Horizon SSE stream of account transactions.
+ *
+ * Replaces the previous setInterval simulation with:
+ * - Horizon.Server(...).transactions().forAccount(...).stream(...)
+ * - sessionStorage cursor persistence
+ * - exponential backoff reconnect with jitter
+ * - bounded txHash deduplication
+ * - payment + Soroban invokeHostFunction decoding
+ */
+export function useRealTimeTransactions(
+  initialTransactions: RealtimeTransaction[] = []
+): UseRealTimeTransactionsResult {
+  const publicKey = useWalletStore((s) => s.publicKey ?? s.address)
+  const network = useWalletStore((s) => s.network)
+  const walletConnected = useWalletStore((s) => s.isConnected)
+
+  const addNotification = useNotificationStore((s) => s.addNotification)
+
+  const [transactions, setTransactions] =
+    useState<RealtimeTransaction[]>(initialTransactions)
+  const [isConnected, setIsConnected] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const seenRef = useRef(new BoundedFifoSet(DEDUPE_CAPACITY))
+  const attemptRef = useRef(0)
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const closeStreamRef = useRef<(() => void) | null>(null)
+  const closedRef = useRef(false)
+
+  const clearReconnectTimer = useCallback(() => {
+    if (reconnectTimerRef.current !== null) {
+      clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = null
+    }
+  }, [])
+
+  const stopStream = useCallback(() => {
+    clearReconnectTimer()
+    if (closeStreamRef.current) {
+      closeStreamRef.current()
+      closeStreamRef.current = null
+    }
+    setIsConnected(false)
+  }, [clearReconnectTimer])
 
   useEffect(() => {
-    // Simulate real-time updates with polling
-    const interval = setInterval(() => {
-      // 30% chance of a new transaction every 10 seconds
-      if (Math.random() < 0.3) {
-        const newTransaction: Transaction = {
-          id: Date.now().toString(),
-          type: Math.random() > 0.3 ? 'donation' : 'distribution',
-          to: Math.random() > 0.5 ? 'Emergency Relief Campaign' : 'Beneficiary #' + Math.floor(Math.random() * 1000),
-          amount: Math.floor(Math.random() * 500) + 50,
-          status: 'completed',
-          timestamp: new Date(),
-        }
+    closedRef.current = false
 
-        setTransactions((prev) => [newTransaction, ...prev].slice(0, 10))
+    if (!walletConnected || !publicKey) {
+      stopStream()
+      setTransactions(initialTransactions)
+      setError(null)
+      seenRef.current.clear()
+      attemptRef.current = 0
+      return () => {
+        closedRef.current = true
+        stopStream()
+      }
+    }
 
-        // Add notification for new transaction
+    const horizonUrl = getHorizonUrl(network)
+
+    const handleTransaction = (record: HorizonTransactionRecord) => {
+      if (closedRef.current) return
+
+      attemptRef.current = 0
+      setIsConnected(true)
+      setError(null)
+
+      const dedupeKey = record.hash || record.paging_token
+      if (!dedupeKey || !seenRef.current.add(dedupeKey)) {
+        return
+      }
+
+      if (record.paging_token) {
+        writeCursor(publicKey, network, record.paging_token)
+      }
+
+      const decoded = decodeHorizonTransaction(record, publicKey)
+      if (decoded.length === 0) {
+        return
+      }
+
+      setTransactions((prev) =>
+        [...decoded, ...prev].slice(0, MAX_VISIBLE_TRANSACTIONS)
+      )
+
+      for (const tx of decoded) {
         addNotification({
           type: 'transaction',
-          title: `New ${newTransaction.type}`,
-          message: `${newTransaction.amount} XLM ${newTransaction.type === 'donation' ? 'received' : 'distributed'} to ${newTransaction.to}`,
+          title: `New ${tx.type}`,
+          message: `${tx.amount} XLM ${
+            tx.type === 'donation' ? 'received' : 'recorded'
+          } (${tx.to})`,
         })
       }
-    }, 10000)
+    }
 
-    return () => clearInterval(interval)
-  }, [addNotification])
+    const openStream = () => {
+      if (closedRef.current) return
 
-  return transactions
+      stopStream()
+
+      try {
+        const server = new Horizon.Server(horizonUrl, {
+          allowHttp: network === 'standalone',
+        })
+        const cursor = readCursor(publicKey, network)
+
+        const close = server
+          .transactions()
+          .forAccount(publicKey)
+          .cursor(cursor)
+          .stream({
+            onmessage: (message) => {
+              // Runtime SSE payloads are individual TransactionRecord objects,
+              // even though the CallBuilder generic is a collection page.
+              handleTransaction(message as unknown as HorizonTransactionRecord)
+            },
+            onerror: (event) => {
+              if (closedRef.current) return
+
+              setIsConnected(false)
+              setError('Horizon transaction stream disconnected')
+
+              if (closeStreamRef.current) {
+                closeStreamRef.current()
+                closeStreamRef.current = null
+              }
+
+              const delay = computeBackoffMs(attemptRef.current)
+              attemptRef.current += 1
+
+              clearReconnectTimer()
+              reconnectTimerRef.current = setTimeout(() => {
+                if (!closedRef.current) {
+                  openStream()
+                }
+              }, delay)
+
+              // Avoid unhandled noisy event objects in tests/devtools.
+              void event
+            },
+          })
+
+        closeStreamRef.current = close
+        setIsConnected(true)
+        setError(null)
+      } catch (err) {
+        setIsConnected(false)
+        setError(
+          err instanceof Error
+            ? err.message
+            : 'Failed to open Horizon transaction stream'
+        )
+
+        const delay = computeBackoffMs(attemptRef.current)
+        attemptRef.current += 1
+        clearReconnectTimer()
+        reconnectTimerRef.current = setTimeout(() => {
+          if (!closedRef.current) {
+            openStream()
+          }
+        }, delay)
+      }
+    }
+
+    openStream()
+
+    return () => {
+      closedRef.current = true
+      stopStream()
+    }
+    // initialTransactions is only a seed for the disconnected/empty state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    walletConnected,
+    publicKey,
+    network,
+    addNotification,
+    stopStream,
+    clearReconnectTimer,
+  ])
+
+  // When the wallet disconnects, drop the session cursor for this account/network
+  // so the next session starts from `now` rather than a stale token.
+  useEffect(() => {
+    if (!walletConnected && publicKey) {
+      clearCursor(publicKey, network)
+    }
+  }, [walletConnected, publicKey, network])
+
+  return {
+    transactions,
+    isConnected,
+    error,
+  }
 }
