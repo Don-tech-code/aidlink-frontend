@@ -1,4 +1,4 @@
-import { SorobanRpc, xdr, TransactionBuilder, Networks, Operation, Account } from '@stellar/stellar-sdk'
+import { SorobanRpc, xdr, TransactionBuilder, Networks, Operation, BASE_FEE } from '@stellar/stellar-sdk'
 import { SOROBAN_NETWORKS } from '@/config/constants'
 
 export interface NetworkConfig {
@@ -29,6 +29,82 @@ export const NETWORKS: Record<NetworkName, NetworkConfig> = {
   },
 }
 
+// ---------------------------------------------------------------------------
+// Typed errors (issue #85)
+// ---------------------------------------------------------------------------
+// Distinct classes so callers can `instanceof`-branch on *why* a submission
+// failed instead of pattern-matching a generic Error's message string.
+
+/** Simulation itself failed (e.g. bad args, contract trap during preflight). */
+export class SorobanSimulationError extends Error {
+  constructor(
+    message: string,
+    /** The raw simulateTransaction response, kept for debugging. */
+    public readonly rawResponse: unknown
+  ) {
+    super(message)
+    this.name = 'SorobanSimulationError'
+  }
+}
+
+/** The transaction reached the ledger but the contract invocation failed. */
+export class SorobanContractError extends Error {
+  constructor(
+    message: string,
+    /** The resultXdr from the failed getTransaction/sendTransaction response. */
+    public readonly resultXdr: unknown
+  ) {
+    super(message)
+    this.name = 'SorobanContractError'
+  }
+}
+
+/** Polling exceeded pollTimeoutMs without the transaction reaching a terminal state. */
+export class SorobanTimeoutError extends Error {
+  constructor(
+    message: string,
+    /** The submitted transaction's hash, so the caller can keep checking manually. */
+    public readonly txHash?: string
+  ) {
+    super(message)
+    this.name = 'SorobanTimeoutError'
+  }
+}
+
+export interface SorobanSDKOptions {
+  /**
+   * Soroban fees are resource-based, not flat. The resource-fee portion of
+   * the simulation's minResourceFee estimate is multiplied by this before
+   * the transaction is assembled, so submissions aren't rejected for
+   * underpaying resource fees on a busy network. Default 1.5.
+   */
+  feeMultiplier?: number
+  /** How often to poll getTransaction while awaiting finality. Default 2000ms. */
+  pollIntervalMs?: number
+  /** How long to poll before rejecting with SorobanTimeoutError. Default 30000ms. */
+  pollTimeoutMs?: number
+}
+
+export interface InvokeContractParams {
+  contractId: string
+  method: string
+  args?: xdr.ScVal[]
+  /** The public key whose account funds and sequences this transaction. */
+  sourcePublicKey: string
+  /**
+   * Signs the assembled transaction's XDR and returns the signed envelope's
+   * XDR. Keeps this SDK decoupled from the wallet layer — WalletService is
+   * never imported here.
+   */
+  signer: (xdr: string) => Promise<string>
+}
+
+export interface InvokeContractResult {
+  txHash: string
+  status: SorobanRpc.Api.GetTransactionStatus.SUCCESS
+  returnValue?: xdr.ScVal
+}
+
 export class SorobanSDK {
   private rpc: SorobanRpc.Server
   /**
@@ -39,13 +115,21 @@ export class SorobanSDK {
   readonly network: NetworkName
   readonly networkPassphrase: string
 
-  constructor(network: NetworkName = 'testnet') {
+  private readonly feeMultiplier: number
+  private readonly pollIntervalMs: number
+  private readonly pollTimeoutMs: number
+
+  constructor(network: NetworkName = 'testnet', options: SorobanSDKOptions = {}) {
     const config = NETWORKS[network]
     this.rpc = new SorobanRpc.Server(config.rpcUrl, {
       allowHttp: network === 'standalone',
     })
     this.network = network
     this.networkPassphrase = config.networkPassphrase
+
+    this.feeMultiplier = options.feeMultiplier ?? 1.5
+    this.pollIntervalMs = options.pollIntervalMs ?? 2000
+    this.pollTimeoutMs = options.pollTimeoutMs ?? 30000
   }
 
   async getAccount(address: string) {
@@ -72,55 +156,184 @@ export class SorobanSDK {
     }
   }
 
-  async invokeContract(
-    contractId: string,
-    method: string,
-    args: xdr.ScVal[] = []
-  ): Promise<xdr.ScVal> {
-    try {
-      // Build a stub account for the transaction builder (sequence is managed server-side)
-      const sourceAccount = new Account(contractId, '0')
+  /**
+   * Runs the full Soroban write-transaction lifecycle as a single atomic
+   * async operation (issue #85): fetch account → build → simulate →
+   * (restore footprint if needed) → assemble → sign → submit → poll until
+   * SUCCESS/FAILED/timeout. Only resolves on a confirmed SUCCESS; every
+   * other outcome rejects with one of SorobanSimulationError,
+   * SorobanContractError, or SorobanTimeoutError.
+   */
+  async invokeContract(params: InvokeContractParams): Promise<InvokeContractResult> {
+    const { contractId, method, sourcePublicKey, signer } = params
+    const args = params.args ?? []
 
-      const tx = new TransactionBuilder(sourceAccount, {
-        fee: '100',
+    const account = await this.rpc.getAccount(sourcePublicKey)
+
+    const buildInvokeTx = () =>
+      new TransactionBuilder(account, {
+        fee: BASE_FEE,
         networkPassphrase: this.networkPassphrase,
       })
-        .addOperation(
-          Operation.invokeContractFunction({
-            contract: contractId,
-            function: method,
-            args,
-          })
-        )
+        .addOperation(Operation.invokeContractFunction({ contract: contractId, function: method, args }))
         .setTimeout(30)
         .build()
 
-      const result = await this.rpc.simulateTransaction(tx)
+    let builtTx = buildInvokeTx()
+    let simulation = await this.rpc.simulateTransaction(builtTx)
 
-      if (SorobanRpc.Api.isSimulationSuccess(result) && result.result) {
-        return result.result.retval
+    if (SorobanRpc.Api.isSimulationError(simulation)) {
+      throw new SorobanSimulationError(`Simulation failed: ${simulation.error}`, simulation)
+    }
+
+    if (SorobanRpc.Api.isSimulationRestore(simulation)) {
+      // Ledger entries the invocation needs have expired. Restore them in a
+      // separate transaction, wait for it to finalize, then rebuild and
+      // re-simulate the original invocation against the account's new
+      // sequence number and the now-live footprint.
+      await this.restoreFootprint(account, simulation.restorePreamble, signer)
+
+      builtTx = buildInvokeTx()
+      simulation = await this.rpc.simulateTransaction(builtTx)
+
+      if (SorobanRpc.Api.isSimulationError(simulation)) {
+        throw new SorobanSimulationError(
+          `Simulation failed after footprint restoration: ${simulation.error}`,
+          simulation
+        )
       }
-      throw new Error('No result from contract invocation')
-    } catch (error) {
-      console.error('Error invoking contract:', error)
-      throw error
+    }
+
+    if (!SorobanRpc.Api.isSimulationSuccess(simulation)) {
+      throw new SorobanSimulationError('Simulation did not return a usable result', simulation)
+    }
+
+    // Pad the resource-fee estimate before assembling — Soroban fees are
+    // resource-based, and the raw minResourceFee is only a bare minimum.
+    const paddedSimulation = {
+      ...simulation,
+      minResourceFee: String(Math.ceil(Number(simulation.minResourceFee) * this.feeMultiplier)),
+    }
+
+    const preparedTx = SorobanRpc.assembleTransaction(builtTx, paddedSimulation).build()
+
+    const signedXdr = await signer(preparedTx.toXDR())
+    const signedTx = TransactionBuilder.fromXDR(signedXdr, this.networkPassphrase)
+
+    const sendResult = await this.rpc.sendTransaction(signedTx)
+
+    if (sendResult.status === 'ERROR') {
+      throw new SorobanContractError(
+        'The network rejected the transaction before it reached the ledger',
+        sendResult.errorResult
+      )
+    }
+
+    const finalResult = await this.pollTransaction(sendResult.hash)
+
+    return {
+      txHash: sendResult.hash,
+      status: SorobanRpc.Api.GetTransactionStatus.SUCCESS,
+      returnValue: finalResult.returnValue,
     }
   }
 
-  async submitTransaction(transaction: xdr.Transaction): Promise<string> {
-    try {
-      // Deserialize the XDR transaction envelope before submitting
-      const txEnvelope = xdr.TransactionEnvelope.fromXDR(transaction.toXDR())
-      const tx = TransactionBuilder.fromXDR(txEnvelope, this.networkPassphrase)
-      const result = await this.rpc.sendTransaction(tx)
-      if (result.errorResult) {
-        throw new Error('Transaction failed')
-      }
-      return result.hash
-    } catch (error) {
-      console.error('Error submitting transaction:', error)
-      throw error
+  /**
+   * Builds, signs, submits, and awaits finality for a RestoreFootprint
+   * operation using the transactionData/fee estimate from a
+   * SimulateTransactionRestoreResponse. Rejects (via pollTransaction) if the
+   * restore itself fails or times out — the caller should not attempt the
+   * original invocation in that case.
+   */
+  private async restoreFootprint(
+    account: Awaited<ReturnType<SorobanRpc.Server['getAccount']>>,
+    restorePreamble: SorobanRpc.Api.SimulateTransactionRestoreResponse['restorePreamble'],
+    signer: (xdr: string) => Promise<string>
+  ): Promise<void> {
+    const paddedRestoreFee = Math.ceil(Number(restorePreamble.minResourceFee) * this.feeMultiplier)
+    const totalFee = String(paddedRestoreFee + Number(BASE_FEE))
+
+    const restoreTx = new TransactionBuilder(account, {
+      fee: totalFee,
+      networkPassphrase: this.networkPassphrase,
+    })
+      .setSorobanData(restorePreamble.transactionData.build())
+      .addOperation(Operation.restoreFootprint({}))
+      .setTimeout(30)
+      .build()
+
+    const signedXdr = await signer(restoreTx.toXDR())
+    const signedTx = TransactionBuilder.fromXDR(signedXdr, this.networkPassphrase)
+
+    const sendResult = await this.rpc.sendTransaction(signedTx)
+
+    if (sendResult.status === 'ERROR') {
+      throw new SorobanContractError('Footprint restoration was rejected by the network', sendResult.errorResult)
     }
+
+    await this.pollTransaction(sendResult.hash)
+  }
+
+  /**
+   * Polls getTransaction on a fixed interval via recursive setTimeout (not
+   * setInterval — so a slow response can never cause two polls to overlap)
+   * until the transaction reaches SUCCESS, FAILED, or pollTimeoutMs elapses.
+   */
+  private pollTransaction(
+    txHash: string
+  ): Promise<SorobanRpc.Api.GetSuccessfulTransactionResponse> {
+    return new Promise((resolve, reject) => {
+      const startedAt = Date.now()
+      let timer: ReturnType<typeof setTimeout> | undefined
+
+      const cleanup = () => {
+        if (timer !== undefined) clearTimeout(timer)
+      }
+
+      const check = async () => {
+        let response: SorobanRpc.Api.GetTransactionResponse | { status: string; resultXdr?: unknown }
+        try {
+          response = await this.rpc.getTransaction(txHash)
+        } catch (error) {
+          cleanup()
+          reject(error)
+          return
+        }
+
+        if (response.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+          cleanup()
+          resolve(response as SorobanRpc.Api.GetSuccessfulTransactionResponse)
+          return
+        }
+
+        if (response.status === SorobanRpc.Api.GetTransactionStatus.FAILED) {
+          cleanup()
+          reject(
+            new SorobanContractError(
+              decodeTransactionResultMessage((response as SorobanRpc.Api.GetFailedTransactionResponse).resultXdr),
+              (response as SorobanRpc.Api.GetFailedTransactionResponse).resultXdr
+            )
+          )
+          return
+        }
+
+        // NOT_FOUND (or any other non-terminal status) — still processing.
+        if (Date.now() - startedAt >= this.pollTimeoutMs) {
+          cleanup()
+          reject(
+            new SorobanTimeoutError(
+              `Transaction ${txHash} did not reach a final state within ${this.pollTimeoutMs}ms`,
+              txHash
+            )
+          )
+          return
+        }
+
+        timer = setTimeout(check, this.pollIntervalMs)
+      }
+
+      check()
+    })
   }
 
   async getTransactionStatus(txHash: string) {
@@ -135,6 +348,22 @@ export class SorobanSDK {
 
   getNetworkPassphrase(): string {
     return this.networkPassphrase
+  }
+}
+
+/**
+ * Best-effort human-readable message from a failed transaction's resultXdr.
+ * resultXdr may already be a parsed xdr.TransactionResult (the real RPC
+ * client's shape) or a raw base64 string (as seen in simplified test
+ * mocks) — handle both without throwing.
+ */
+function decodeTransactionResultMessage(resultXdr: unknown): string {
+  try {
+    const parsed =
+      typeof resultXdr === 'string' ? xdr.TransactionResult.fromXDR(resultXdr, 'base64') : (resultXdr as xdr.TransactionResult)
+    return `Transaction failed: ${parsed.result().switch().name}`
+  } catch {
+    return 'Transaction failed'
   }
 }
 

@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { sorobanSDK } from '@/lib/soroban/sdk'
+import { sorobanSDK, type InvokeContractParams, type InvokeContractResult } from '@/lib/soroban/sdk'
 import { toast } from 'sonner'
 
 export function useBalance(accountId: string | null) {
@@ -11,23 +11,23 @@ export function useBalance(accountId: string | null) {
   })
 }
 
+/**
+ * Runs the full Soroban write-transaction lifecycle (issue #85):
+ * prepare → simulate → (restore footprint if needed) → sign → submit →
+ * poll until finality. The mutation only resolves once the transaction is
+ * confirmed SUCCESS on-chain — it does not resolve early on a "submitted"
+ * or PENDING response the way the previous fire-and-forget implementation
+ * did.
+ */
 export function useContractInvoke() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async ({
-      contractId,
-      method,
-      args,
-    }: {
-      contractId: string
-      method: string
-      args: any[]
-    }) => {
-      return await sorobanSDK.invokeContract(contractId, method, args)
+    mutationFn: async (params: InvokeContractParams): Promise<InvokeContractResult> => {
+      return await sorobanSDK.invokeContract(params)
     },
     onSuccess: () => {
-      toast.success('Contract invocation successful')
+      toast.success('Contract invocation confirmed on-chain')
       queryClient.invalidateQueries({ queryKey: ['contract'] })
     },
     onError: (error) => {
@@ -38,25 +38,17 @@ export function useContractInvoke() {
   })
 }
 
+/**
+ * Thin alias over useContractInvoke (issue #85). Previously this wrapped a
+ * separate fire-and-forget submitTransaction() that returned as soon as
+ * sendTransaction responded, without waiting for the transaction to
+ * actually finalize. invokeContract() now owns the entire submit→poll
+ * loop, so there is nothing left for this hook to do differently — it's
+ * kept as a named alias for call sites that talk about "submitting a
+ * transaction" rather than "invoking a contract".
+ */
 export function useTransactionSubmit() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: async (transaction: any) => {
-      return await sorobanSDK.submitTransaction(transaction)
-    },
-    onSuccess: (hash) => {
-      toast.success('Transaction submitted', {
-        description: `Transaction hash: ${hash}`,
-      })
-      queryClient.invalidateQueries({ queryKey: ['transaction'] })
-    },
-    onError: (error) => {
-      toast.error('Transaction failed', {
-        description: error instanceof Error ? error.message : 'Unknown error',
-      })
-    },
-  })
+  return useContractInvoke()
 }
 
 export function useTransactionStatus(txHash: string | null) {
