@@ -139,12 +139,12 @@ export default function NGOOnboardingPage() {
                 <div>
                   <Label htmlFor="email">Email Address *</Label>
                   <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Mail className="absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
                       id="email"
                       type="email"
                       placeholder="contact@ngo.org"
-                      className="pl-10"
+                      className="ps-10"
                       value={formData.email}
                       onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                       required
@@ -155,12 +155,12 @@ export default function NGOOnboardingPage() {
                 <div>
                   <Label htmlFor="phone">Phone Number *</Label>
                   <div className="relative">
-                    <Phone className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Phone className="absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
                       id="phone"
                       type="tel"
                       placeholder="+1 234 567 8900"
-                      className="pl-10"
+                      className="ps-10"
                       value={formData.phone}
                       onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                       required
@@ -171,12 +171,12 @@ export default function NGOOnboardingPage() {
                 <div>
                   <Label htmlFor="website">Website</Label>
                   <div className="relative">
-                    <Globe className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Globe className="absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
                       id="website"
                       type="url"
                       placeholder="https://www.ngo.org"
-                      className="pl-10"
+                      className="ps-10"
                       value={formData.website}
                       onChange={(e) => setFormData({ ...formData, website: e.target.value })}
                     />
@@ -185,7 +185,7 @@ export default function NGOOnboardingPage() {
 
                 <div className="flex justify-end">
                   <Button type="button" onClick={handleNext}>
-                    Next <ArrowRight className="ml-2 h-4 w-4" />
+                    Next <ArrowRight className="ms-2 h-4 w-4" />
                   </Button>
                 </div>
               </CardContent>
@@ -256,7 +256,7 @@ export default function NGOOnboardingPage() {
                     Back
                   </Button>
                   <Button type="button" onClick={handleNext}>
-                    Next <ArrowRight className="ml-2 h-4 w-4" />
+                    Next <ArrowRight className="ms-2 h-4 w-4" />
                   </Button>
                 </div>
               </CardContent>

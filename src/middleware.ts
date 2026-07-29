@@ -1,35 +1,27 @@
-import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
-import { UserRole } from '@/types';
+import createMiddleware from 'next-intl/middleware'
+import { routing } from '@/i18n/routing'
 
-const ROUTE_PERMISSIONS: { prefix: string; allowedRoles: UserRole[] }[] = [
-  { prefix: '/admin', allowedRoles: ['admin'] },
-  { prefix: '/campaigns/create', allowedRoles: ['ngo', 'admin'] },
-  { prefix: '/beneficiary', allowedRoles: ['beneficiary', 'admin'] },
-];
-
-export function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
-
-  const matchedRoute = ROUTE_PERMISSIONS.find((route) =>
-    pathname.startsWith(route.prefix)
-  );
-
-  if (!matchedRoute) {
-    return NextResponse.next();
-  }
-
-  const roleCookie = request.cookies.get('auth-role')?.value as UserRole | undefined;
-
-  if (!roleCookie || !matchedRoute.allowedRoles.includes(roleCookie)) {
-    const authUrl = new URL('/auth', request.url);
-    authUrl.searchParams.set('unauthorized', 'true');
-    return NextResponse.redirect(authUrl);
-  }
-
-  return NextResponse.next();
-}
+/**
+ * next-intl middleware.
+ *
+ * Handles locale detection and routing:
+ *  1. An explicit locale in the URL (e.g. `/ar/...`) always wins.
+ *  2. Otherwise the `NEXT_LOCALE` cookie is used, if present.
+ *  3. Otherwise the `Accept-Language` request header is negotiated against
+ *     the supported locales.
+ *  4. Falling back to the default locale (`en`).
+ *
+ * With `localePrefix: 'as-needed'`, the default locale is served without a
+ * prefix while non-default locales are prefixed. The middleware also persists
+ * the resolved locale in the `NEXT_LOCALE` cookie.
+ */
+export default createMiddleware(routing)
 
 export const config = {
-  matcher: ['/admin/:path*', '/campaigns/create', '/beneficiary/:path*'],
-};
+  // Match all pathnames except for:
+  //  - API routes (`/api`, `/trpc`)
+  //  - Next.js internals (`/_next`, `/_vercel`)
+  //  - the health check route
+  //  - any path that contains a dot (static files such as `favicon.ico`)
+  matcher: ['/((?!api|_next|_vercel|health|.*\\..*).*)'],
+}

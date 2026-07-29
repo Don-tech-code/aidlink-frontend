@@ -1,10 +1,13 @@
 'use client';
 
+import { useLocale } from 'next-intl';
 import { useAnalytics } from '@/hooks/use-analytics';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { formatAmount } from '@/lib/utils';
 
 export function CampaignAnalytics({ campaignId }: { campaignId: string }) {
+  const locale = useLocale();
   const { analytics, loading, error } = useAnalytics(campaignId);
 
   if (loading) return <p>Loading analytics...</p>;
@@ -22,7 +25,7 @@ export function CampaignAnalytics({ campaignId }: { campaignId: string }) {
           </div>
           <div>
             <p className="text-sm text-muted-foreground">Total Amount</p>
-            <p className="text-2xl font-bold">{analytics.totalAmount.toLocaleString()} XLM</p>
+            <p className="text-2xl font-bold">{formatAmount(analytics.totalAmount, 2, locale)} XLM</p>
           </div>
           <div>
             <p className="text-sm text-muted-foreground">Unique Donors</p>
@@ -41,7 +44,7 @@ export function CampaignAnalytics({ campaignId }: { campaignId: string }) {
           {analytics.dailyDonations.map((day) => (
             <div key={day.date} className="flex justify-between items-center">
               <span className="text-sm">{day.date}</span>
-              <Badge variant="secondary">{day.amount.toLocaleString()} XLM</Badge>
+              <Badge variant="secondary">{formatAmount(day.amount, 2, locale)} XLM</Badge>
             </div>
           ))}
         </div>

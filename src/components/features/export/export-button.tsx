@@ -18,36 +18,47 @@ import {
 import { Progress } from '@/components/ui/progress'
 import { Download, FileSpreadsheet, FileText } from 'lucide-react'
 import { toast } from 'sonner'
-import { useWalletStore } from '@/store/wallet-store'
-import { TransactionExporter } from '@/lib/export/transaction-exporter'
-import type { StellarNetwork } from '@/lib/export/transaction-exporter'
+import { useLocale } from 'next-intl'
+import { formatDate } from '@/lib/utils'
+
+export interface Transaction {
+  id: string
+  type: string
+  to: string
+  amount: number
+  status: string
+  timestamp: Date
+}
 
 interface ExportButtonProps {
   filename?: string
-  /** Maximum transactions to fetch from Horizon (default: 5000) */
-  maxTransactions?: number
 }
 
-/**
- * ExportButton
- *
- * Self-contained export control that reads the connected wallet from WalletStore,
- * fetches real transaction history from Horizon, and generates a provenance-authenticated
- * CSV or JSON file.
- *
- * No `transactions` prop — all data comes from the live Horizon payments endpoint.
- */
-export function ExportButton({
-  filename = 'aidlink-transactions',
-  maxTransactions = 5000,
-}: ExportButtonProps) {
-  const { publicKey, network, isConnected } = useWalletStore()
-  const [isExporting, setIsExporting] = useState(false)
-  const [progress, setProgress] = useState(0)
-  const [statusText, setStatusText] = useState('')
+export function ExportButton({ transactions, filename = 'donation-history' }: ExportButtonProps) {
+  const locale = useLocale()
 
-  const triggerDownload = (blob: Blob, ext: string) => {
-    const url = URL.createObjectURL(blob)
+  const exportToCSV = () => {
+    if (transactions.length === 0) {
+      toast.error('No transactions to export')
+      return
+    }
+
+    const headers = ['ID', 'Type', 'To', 'Amount (XLM)', 'Status', 'Date']
+    const rows = transactions.map((tx) => [
+      tx.id,
+      tx.type,
+      tx.to,
+      tx.amount.toString(),
+      tx.status,
+      formatDate(tx.timestamp, locale),
+    ])
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map((row) => row.map((cell) => `"${cell}"`).join(',')),
+    ].join('\n')
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
     const link = document.createElement('a')
     link.href = url
     link.download = `${filename}.${ext}`

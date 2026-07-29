@@ -7,6 +7,7 @@ import { ThemeToggle } from '@/components/features/theme/theme-toggle'
 import { Wallet, LogOut, Menu, X } from 'lucide-react'
 import { useState } from 'react'
 import Link from 'next/link'
+import { useTranslations } from 'next-intl'
 import { usePathname } from 'next/navigation'
 import { formatAddress, cn } from '@/lib/utils'
 
@@ -14,6 +15,7 @@ export function Navigation() {
   const { isConnected, address, disconnect } = useWalletStore()
   const pathname = usePathname()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const t = useTranslations('Nav')
 
   function isActive(href: string) {
     if (href === '/') return pathname === '/'

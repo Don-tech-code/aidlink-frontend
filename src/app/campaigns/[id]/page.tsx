@@ -29,6 +29,8 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { formatAmount, formatDate, calculateCampaignProgress, getCampaignFundingStatus } from '@/lib/utils'
+import { formatAmount, formatDate, formatDateTime } from '@/lib/utils'
+import { useLocale } from 'next-intl'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { useQueryClient } from '@tanstack/react-query'
@@ -46,6 +48,10 @@ export default function CampaignDetailPage() {
   const queryClient = useQueryClient()
   const router = useRouter()
 
+
+export default function CampaignDetailPage({ params }: { params: { id: string } }) {
+  const locale = useLocale()
+  const [isLoading, setIsLoading] = useState(true)
   const [donationAmount, setDonationAmount] = useState('')
 
   const { data: campaign, isLoading, isError } = useCampaign(campaignId)
@@ -208,6 +214,33 @@ export default function CampaignDetailPage() {
       </div>
     )
   }
+    setIsDonating(true)
+    try {
+      // Simulate donation process
+      await new Promise((resolve) => setTimeout(resolve, 2000))
+      toast.success('Donation successful!', {
+        description: `Thank you for donating ${formatAmount(parseFloat(donationAmount), 2, locale)} XLM`,
+      })
+      setDonationAmount('')
+    } catch (error) {
+      toast.error('Donation failed', {
+        description: 'Please try again later',
+      })
+    } finally {
+      setIsDonating(false)
+    }
+  }
+
+  const progress = calculateCampaignProgress(campaign.raisedAmount, campaign.targetAmount)
+  const fundingStatus = getCampaignFundingStatus(campaign.raisedAmount, campaign.targetAmount)
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsLoading(false)
+    }, 600)
+
+    return () => clearTimeout(timer)
+  }, [])
 
   return (
     <div className="min-h-screen bg-background">
@@ -260,6 +293,7 @@ export default function CampaignDetailPage() {
                       <span className="text-muted-foreground">Raised</span>
                       <span className="font-medium">
                         {formatAmount(campaign!.raisedAmount)} / {formatAmount(campaign!.targetAmount)} XLM
+                        {formatAmount(campaign.raisedAmount, 2, locale)} / {formatAmount(campaign.targetAmount, 2, locale)} XLM
                       </span>
                     </div>
                     <div className="w-full bg-secondary h-3 rounded-full overflow-hidden">
@@ -271,6 +305,10 @@ export default function CampaignDetailPage() {
                     <div className="flex justify-between text-sm mt-2">
                       <span className="text-muted-foreground">{fundingStatus?.label}</span>
                       <span className="text-muted-foreground">{fundingStatus?.description}</span>
+                      <span className="text-muted-foreground">{progress.toFixed(1)}% funded</span>
+                      <span className="text-muted-foreground">
+                        {formatAmount(campaign.targetAmount - campaign.raisedAmount, 2, locale)} XLM remaining
+                      </span>
                     </div>
                   </div>
 
@@ -318,6 +356,7 @@ export default function CampaignDetailPage() {
                       <div>
                         <div className="font-medium">End Date</div>
                         <div className="text-sm text-muted-foreground">{formatDate(campaign!.endDate)}</div>
+                        <div className="text-sm text-muted-foreground">{formatDate(campaign.endDate, locale)}</div>
                       </div>
                     </div>
                     <div className="flex items-start gap-3">
@@ -332,6 +371,7 @@ export default function CampaignDetailPage() {
                       <div>
                         <div className="font-medium">Created</div>
                         <div className="text-sm text-muted-foreground">{formatDate(campaign!.createdAt)}</div>
+                        <div className="text-sm text-muted-foreground">{formatDate(campaign.createdAt, locale)}</div>
                       </div>
                     </div>
                   </div>
@@ -368,7 +408,7 @@ export default function CampaignDetailPage() {
                                 {beneficiary.status}
                               </Badge>
                             </TableCell>
-                            <TableCell>{formatAmount(beneficiary.allocatedAmount)} XLM</TableCell>
+                            <TableCell>{formatAmount(beneficiary.allocatedAmount, 2, locale)} XLM</TableCell>
                           </TableRow>
                         ))
                       )}
@@ -394,8 +434,8 @@ export default function CampaignDetailPage() {
                         recentDonations.map((donation) => (
                           <TableRow key={donation.id}>
                             <TableCell>{donation.donor}</TableCell>
-                            <TableCell>{formatAmount(donation.amount)} XLM</TableCell>
-                            <TableCell>{new Date(donation.timestamp).toLocaleString()}</TableCell>
+                            <TableCell>{formatAmount(donation.amount, 2, locale)} XLM</TableCell>
+                            <TableCell>{formatDateTime(donation.timestamp, locale)}</TableCell>
                           </TableRow>
                         ))
                       )}
