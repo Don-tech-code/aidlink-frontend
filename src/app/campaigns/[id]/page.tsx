@@ -25,15 +25,17 @@ import {
   CheckCircle2,
   ExternalLink,
   Loader2,
+  SearchX,
 } from 'lucide-react'
 import Link from 'next/link'
-import { formatAmount, formatDate } from '@/lib/utils'
+import { formatAmount, formatDate, calculateCampaignProgress, getCampaignFundingStatus } from '@/lib/utils'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { useQueryClient } from '@tanstack/react-query'
 import { useDonation, WalletNotConnectedError, classifyDonationError } from '@/hooks/use-donation'
 import { useParams, useRouter } from 'next/navigation'
-import { calculateCampaignProgress } from '@/lib/utils'
+import { useCampaign } from '@/hooks/use-campaign'
+import { EmptyState } from '@/components/ui/empty-state'
 
 // Horizon testnet explorer base URL for transaction links
 const HORIZON_EXPLORER_BASE = 'https://stellar.expert/explorer/testnet/tx'
@@ -44,8 +46,9 @@ export default function CampaignDetailPage() {
   const queryClient = useQueryClient()
   const router = useRouter()
 
-  const [isLoading, setIsLoading] = useState(true)
   const [donationAmount, setDonationAmount] = useState('')
+
+  const { data: campaign, isLoading, isError } = useCampaign(campaignId)
 
   const { state: donationState, donate, reset: resetDonation, feeConfirmed, feeDismissed } =
     useDonation(campaignId)
@@ -56,31 +59,6 @@ export default function CampaignDetailPage() {
     donationState.status !== 'success' &&
     donationState.status !== 'error' &&
     donationState.status !== 'awaiting-confirmation'
-
-  const campaign = {
-    id: campaignId,
-    title: 'Emergency Relief for Flood Victims',
-    description:
-      'Providing immediate relief to families affected by severe flooding in the region. Funds will be used for food, shelter, and medical supplies. This campaign aims to support 500 families who have lost their homes and livelihoods due to the devastating floods.',
-    targetAmount: 50000,
-    raisedAmount: 35000,
-    status: 'active',
-    category: 'emergency',
-    ngoName: 'Red Cross International',
-    ngoId: 'ngo-1',
-    endDate: '2026-06-30',
-    createdAt: '2026-05-01',
-    location: {
-      country: 'Bangladesh',
-      region: 'Sylhet Division',
-      city: 'Sylhet',
-    },
-    beneficiaries: [
-      { id: '1', name: 'Family A', status: 'verified', allocatedAmount: 500 },
-      { id: '2', name: 'Family B', status: 'verified', allocatedAmount: 500 },
-      { id: '3', name: 'Family C', status: 'pending', allocatedAmount: 500 },
-    ],
-  }
 
   const recentDonations = [
     { id: '1', donor: 'Anonymous', amount: 500, timestamp: new Date(Date.now() - 3600000).toISOString() },
@@ -157,12 +135,10 @@ export default function CampaignDetailPage() {
   // ---------------------------------------------------------------------------
   // Derived UI state
   // ---------------------------------------------------------------------------
-  const progress = calculateCampaignProgress(campaign.raisedAmount, campaign.targetAmount)
-
-  useEffect(() => {
-    const timer = setTimeout(() => setIsLoading(false), 600)
-    return () => clearTimeout(timer)
-  }, [])
+  const progress = campaign ? calculateCampaignProgress(campaign.raisedAmount, campaign.targetAmount) : 0
+  const fundingStatus = campaign
+    ? getCampaignFundingStatus(campaign.raisedAmount, campaign.targetAmount)
+    : null
 
   // ---------------------------------------------------------------------------
   // Donate button label
@@ -209,6 +185,30 @@ export default function CampaignDetailPage() {
     }
   }
 
+  if (!isLoading && (isError || !campaign)) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Navigation />
+        <main className="container py-8">
+          <Link href="/campaigns" className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground mb-6">
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to Campaigns
+          </Link>
+          <EmptyState
+            icon={SearchX}
+            title="Campaign not found"
+            description={
+              isError
+                ? "We couldn't load this campaign. Please try again."
+                : "This campaign doesn't exist or may have been removed."
+            }
+            action={{ label: 'Browse campaigns', onClick: () => router.push('/campaigns') }}
+          />
+        </main>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-background">
       <Navigation />
@@ -237,12 +237,12 @@ export default function CampaignDetailPage() {
               <div>
                 <div className="flex items-center gap-2 mb-4">
                   <Badge variant="secondary" className="capitalize">
-                    {campaign.category}
+                    {campaign!.category}
                   </Badge>
                   <Badge className="bg-green-600">Active</Badge>
                 </div>
-                <h1 className="text-3xl font-bold mb-4">{campaign.title}</h1>
-                <p className="text-muted-foreground text-lg">{campaign.description}</p>
+                <h1 className="text-3xl font-bold mb-4">{campaign!.title}</h1>
+                <p className="text-muted-foreground text-lg">{campaign!.description}</p>
               </div>
             )}
 
@@ -259,7 +259,7 @@ export default function CampaignDetailPage() {
                     <div className="flex justify-between text-sm mb-2">
                       <span className="text-muted-foreground">Raised</span>
                       <span className="font-medium">
-                        {formatAmount(campaign.raisedAmount)} / {formatAmount(campaign.targetAmount)} XLM
+                        {formatAmount(campaign!.raisedAmount)} / {formatAmount(campaign!.targetAmount)} XLM
                       </span>
                     </div>
                     <div className="w-full bg-secondary h-3 rounded-full overflow-hidden">
@@ -269,16 +269,14 @@ export default function CampaignDetailPage() {
                       />
                     </div>
                     <div className="flex justify-between text-sm mt-2">
-                      <span className="text-muted-foreground">{progress.toFixed(1)}% funded</span>
-                      <span className="text-muted-foreground">
-                        {formatAmount(campaign.targetAmount - campaign.raisedAmount)} XLM remaining
-                      </span>
+                      <span className="text-muted-foreground">{fundingStatus?.label}</span>
+                      <span className="text-muted-foreground">{fundingStatus?.description}</span>
                     </div>
                   </div>
 
                   <div className="grid grid-cols-3 gap-4 pt-4 border-t">
                     <div className="text-center">
-                      <div className="text-2xl font-bold">{campaign.beneficiaries.length}</div>
+                      <div className="text-2xl font-bold">{campaign!.beneficiaries.length}</div>
                       <div className="text-sm text-muted-foreground">Beneficiaries</div>
                     </div>
                     <div className="text-center">
@@ -287,7 +285,7 @@ export default function CampaignDetailPage() {
                     </div>
                     <div className="text-center">
                       <div className="text-2xl font-bold">
-                        {Math.ceil((new Date(campaign.endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24))}
+                        {Math.ceil((new Date(campaign!.endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24))}
                       </div>
                       <div className="text-sm text-muted-foreground">Days Left</div>
                     </div>
@@ -311,7 +309,7 @@ export default function CampaignDetailPage() {
                       <div>
                         <div className="font-medium">Location</div>
                         <div className="text-sm text-muted-foreground">
-                          {campaign.location.city}, {campaign.location.region}, {campaign.location.country}
+                          {campaign!.location.city}, {campaign!.location.region}, {campaign!.location.country}
                         </div>
                       </div>
                     </div>
@@ -319,21 +317,21 @@ export default function CampaignDetailPage() {
                       <Calendar className="h-5 w-5 text-muted-foreground mt-0.5" />
                       <div>
                         <div className="font-medium">End Date</div>
-                        <div className="text-sm text-muted-foreground">{formatDate(campaign.endDate)}</div>
+                        <div className="text-sm text-muted-foreground">{formatDate(campaign!.endDate)}</div>
                       </div>
                     </div>
                     <div className="flex items-start gap-3">
                       <Users className="h-5 w-5 text-muted-foreground mt-0.5" />
                       <div>
                         <div className="font-medium">Organizer</div>
-                        <div className="text-sm text-muted-foreground">{campaign.ngoName}</div>
+                        <div className="text-sm text-muted-foreground">{campaign!.ngoName}</div>
                       </div>
                     </div>
                     <div className="flex items-start gap-3">
                       <Clock className="h-5 w-5 text-muted-foreground mt-0.5" />
                       <div>
                         <div className="font-medium">Created</div>
-                        <div className="text-sm text-muted-foreground">{formatDate(campaign.createdAt)}</div>
+                        <div className="text-sm text-muted-foreground">{formatDate(campaign!.createdAt)}</div>
                       </div>
                     </div>
                   </div>
@@ -362,7 +360,7 @@ export default function CampaignDetailPage() {
                       {isLoading ? (
                         <TableRowSkeleton />
                       ) : (
-                        campaign.beneficiaries.map((beneficiary) => (
+                        campaign!.beneficiaries.map((beneficiary) => (
                           <TableRow key={beneficiary.id}>
                             <TableCell>{beneficiary.name}</TableCell>
                             <TableCell>
