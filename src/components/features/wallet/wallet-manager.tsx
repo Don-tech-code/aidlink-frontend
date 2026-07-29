@@ -1,13 +1,28 @@
 'use client';
 
+import { useState } from 'react';
 import { useWalletEnhanced } from '@/hooks/use-wallet-enhanced';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Copy, Check } from 'lucide-react';
+import { toast } from 'sonner';
 
 export function WalletManager() {
   const { wallet, loading, error, connectWallet, disconnectWallet, switchNetwork, refreshBalance } = useWalletEnhanced();
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyAddress = async () => {
+    try {
+      await navigator.clipboard.writeText(wallet.publicKey);
+      setCopied(true);
+      toast.success('Address copied to clipboard!');
+      setTimeout(() => setCopied(false), 2000);
+    } catch (error) {
+      toast.error('Failed to copy address');
+    }
+  };
 
   return (
     <Card className="p-6">
@@ -37,7 +52,22 @@ export function WalletManager() {
         <div className="space-y-4">
           <div>
             <p className="text-sm text-muted-foreground">Public Key</p>
-            <p className="font-mono text-sm">{wallet.publicKey}</p>
+            <div className="flex items-center gap-2">
+              <p className="font-mono text-sm">{wallet.publicKey}</p>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0"
+                onClick={handleCopyAddress}
+                aria-label="Copy address"
+              >
+                {copied ? (
+                  <Check className="h-3.5 w-3.5 text-green-600" />
+                ) : (
+                  <Copy className="h-3.5 w-3.5" />
+                )}
+              </Button>
+            </div>
           </div>
           <div>
             <p className="text-sm text-muted-foreground">Balance</p>

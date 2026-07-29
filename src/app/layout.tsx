@@ -8,6 +8,7 @@ import { ThemeProvider } from '@/components/providers/theme-provider'
 import { QueryProvider } from '@/components/providers/query-provider'
 import { Toaster } from '@/components/ui/toaster'
 import { MobileNavigation } from '@/components/layout/mobile-navigation'
+import { NetworkGuard } from '@/components/features/wallet/network-guard'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -33,15 +34,15 @@ export default async function RootLayout({
   return (
     <html lang={locale} dir={dir} suppressHydrationWarning>
       <body className={inter.className}>
-        <NextIntlClientProvider locale={locale} messages={messages}>
-          <ThemeProvider>
-            <QueryProvider>
+        <ThemeProvider>
+          <QueryProvider>
+            <NetworkGuard>
               {children}
               <MobileNavigation />
-              <Toaster />
-            </QueryProvider>
-          </ThemeProvider>
-        </NextIntlClientProvider>
+            </NetworkGuard>
+            <Toaster />
+          </QueryProvider>
+        </ThemeProvider>
       </body>
     </html>
   )

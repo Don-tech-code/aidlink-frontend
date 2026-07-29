@@ -1,13 +1,13 @@
 'use client'
 
-import { Navigation } from '@/components/layout/navigation'
-import { VerificationBanner } from '@/components/beneficiary/VerificationBanner'
-import { VerificationWorkflow } from '@/components/beneficiary/VerificationWorkflow'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import React, { useEffect, useState, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
+import { AlertCircle, Loader2, RefreshCw, ShieldCheck, ShieldOff } from 'lucide-react'
+import { withRequireRole } from '@/components/providers/auth-provider'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { QRCodeSVG } from 'qrcode.react'
-import { Wallet, QrCode, History, CheckCircle2, Clock, AlertCircle } from 'lucide-react'
+import { Skeleton } from '@/components/ui/skeleton'
+import { AllocationCard } from '@/components/beneficiary/AllocationCard'
+import { VerificationBanner } from '@/components/beneficiary/VerificationBanner'
 import { useWalletStore } from '@/store/wallet-store'
 import { formatAddress, formatAmount, formatDate } from '@/lib/utils'
 import { useLocale } from 'next-intl'
@@ -105,13 +105,34 @@ export default function BeneficiaryPage() {
   const isVerified = beneficiary.verificationStatus === 'verified'
 
   return (
-    <div className="min-h-screen bg-background">
-      <Navigation />
-      
-      <main className="container py-8">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-2">Beneficiary Portal</h1>
-          <p className="text-muted-foreground">Claim your allocated aid and track your claim history</p>
+    <div className="container mx-auto max-w-4xl px-4 py-8 space-y-8">
+      {/* ── Header ── */}
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">Beneficiary Portal</h1>
+        <p className="text-muted-foreground mt-1">
+          Manage your aid disbursements. Each QR code below is a signed claim
+          token unique to your wallet.
+        </p>
+      </div>
+
+      {/* ── Verification status banner ── */}
+      {!statusLoading && (
+        <VerificationBanner status={verificationStatus} />
+      )}
+
+      {/* ── Not verified gate ── */}
+      {!statusLoading && !isVerified && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 flex items-start gap-3">
+          <ShieldOff className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" aria-hidden />
+          <div>
+            <p className="font-medium text-amber-900 text-sm">Identity verification required</p>
+            <p className="text-sm text-amber-800 mt-0.5">
+              Your identity must be verified before you can claim aid.{' '}
+              {verificationStatus === 'pending'
+                ? 'Your submission is under review — check back soon.'
+                : 'Submit your proof documents to begin the process.'}
+            </p>
+          </div>
         </div>
 
         {/* Wallet Overview */}
@@ -183,19 +204,10 @@ export default function BeneficiaryPage() {
                 ))}
               </div>
             ) : (
-              <Card>
-                <CardContent className="pt-6">
-                  <div className="text-center py-8">
-                    <Clock className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                    <h3 className="text-lg font-semibold mb-2">No Available Claims</h3>
-                    <p className="text-muted-foreground">New approved aid allocations will appear here.</p>
-                  </div>
-                </CardContent>
-              </Card>
-            )
-          ) : (
-            <VerificationWorkflow beneficiary={beneficiary} onSubmitProof={handleSubmitProof} />
-          )}
+              <RefreshCw className="h-4 w-4" aria-hidden />
+            )}
+            <span className="ml-1.5">Refresh</span>
+          </Button>
         </div>
 
         {/* Claim History */}
@@ -241,3 +253,5 @@ export default function BeneficiaryPage() {
     </div>
   )
 }
+
+export default withRequireRole(BeneficiaryPortalPage, ['beneficiary', 'admin'])

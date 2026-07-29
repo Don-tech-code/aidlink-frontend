@@ -8,12 +8,26 @@ import { Wallet, LogOut, Menu, X } from 'lucide-react'
 import { useState } from 'react'
 import Link from 'next/link'
 import { useTranslations } from 'next-intl'
-import { formatAddress } from '@/lib/utils'
+import { usePathname } from 'next/navigation'
+import { formatAddress, cn } from '@/lib/utils'
 
 export function Navigation() {
   const { isConnected, address, disconnect } = useWalletStore()
+  const pathname = usePathname()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const t = useTranslations('Nav')
+
+  function isActive(href: string) {
+    if (href === '/') return pathname === '/'
+    return pathname === href || pathname.startsWith(href + '/')
+  }
+
+  function navLinkClass(href: string) {
+    return cn(
+      'text-sm font-medium hover:text-primary',
+      isActive(href) && 'text-primary font-semibold'
+    )
+  }
 
   return (
     <nav className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -25,16 +39,16 @@ export function Navigation() {
 
         {/* Desktop Navigation */}
         <div className="hidden items-center space-x-6 md:flex">
-          <Link href="/campaigns" className="text-sm font-medium hover:text-primary">
+          <Link href="/campaigns" className={navLinkClass('/campaigns')} aria-current={isActive('/campaigns') ? 'page' : undefined}>
             Campaigns
           </Link>
-          <Link href="/about" className="text-sm font-medium hover:text-primary">
+          <Link href="/about" className={navLinkClass('/about')} aria-current={isActive('/about') ? 'page' : undefined}>
             About
           </Link>
           <ThemeToggle />
           {isConnected ? (
             <>
-              <Link href="/dashboard" className="text-sm font-medium hover:text-primary">
+              <Link href="/dashboard" className={navLinkClass('/dashboard')} aria-current={isActive('/dashboard') ? 'page' : undefined}>
                 Dashboard
               </Link>
               <div className="flex items-center space-x-2">
@@ -66,10 +80,10 @@ export function Navigation() {
       {mobileMenuOpen && (
         <div className="border-t md:hidden">
           <div className="container space-y-4 py-4">
-            <Link href="/campaigns" className="block text-sm font-medium">
+            <Link href="/campaigns" className={cn('block text-sm font-medium', isActive('/campaigns') && 'text-primary font-semibold')} aria-current={isActive('/campaigns') ? 'page' : undefined}>
               Campaigns
             </Link>
-            <Link href="/about" className="block text-sm font-medium">
+            <Link href="/about" className={cn('block text-sm font-medium', isActive('/about') && 'text-primary font-semibold')} aria-current={isActive('/about') ? 'page' : undefined}>
               About
             </Link>
             <div className="flex items-center justify-between">
@@ -78,7 +92,7 @@ export function Navigation() {
             </div>
             {isConnected ? (
               <>
-                <Link href="/dashboard" className="block text-sm font-medium">
+                <Link href="/dashboard" className={cn('block text-sm font-medium', isActive('/dashboard') && 'text-primary font-semibold')} aria-current={isActive('/dashboard') ? 'page' : undefined}>
                   Dashboard
                 </Link>
                 <div className="flex items-center justify-between">

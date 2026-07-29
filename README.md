@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![AidLink Logo](https://via.placeholder.com/150)
+![AidLink Logo](http://web.archive.org/web/20250107203856/https://via.placeholder.com/150)
 
 **A production-grade decentralized humanitarian aid platform frontend built on the Stellar blockchain**
 

@@ -64,9 +64,9 @@ export function useTransactionStatus(txHash: string | null) {
     queryKey: ['transaction-status', txHash],
     queryFn: () => sorobanSDK.getTransactionStatus(txHash || ''),
     enabled: !!txHash,
-    refetchInterval: (data) => {
+    refetchInterval: (query) => {
       // Refetch every 2 seconds until transaction is successful
-      return data?.status === 'success' ? false : 2000
+      return query.state.data?.status === 'SUCCESS' ? false : 2000
     },
   })
 }

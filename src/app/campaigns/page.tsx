@@ -5,11 +5,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { CampaignFilters, CampaignFilters as CampaignFiltersType } from '@/components/features/campaigns/campaign-filters'
 import { ShareButton } from '@/components/features/social/share-button'
 import { CampaignComparison } from '@/components/features/campaigns/campaign-comparison'
-import { Search, Heart, TrendingUp, Clock } from 'lucide-react'
+import { Search, Heart, Clock } from 'lucide-react'
 import { useState, useMemo } from 'react'
 import Link from 'next/link'
 import { formatAmount, formatDate, calculateCampaignProgress } from '@/lib/utils'
@@ -27,80 +27,9 @@ export default function CampaignsPage() {
     selectedNGOs: [],
   })
 
-  const campaigns = useMemo(() => [
-    {
-      id: '1',
-      title: 'Emergency Relief for Flood Victims',
-      description: 'Providing immediate relief to families affected by severe flooding in the region. Funds will be used for food, shelter, and medical supplies.',
-      targetAmount: 50000,
-      raisedAmount: 35000,
-      status: 'active',
-      category: 'emergency',
-      ngoName: 'Red Cross International',
-      endDate: '2026-06-30',
-      imageUrl: '/api/placeholder/400/200',
-    },
-    {
-      id: '2',
-      title: 'Medical Supplies for Children',
-      description: 'Supplying essential medical equipment and medicines to children in need across multiple healthcare facilities.',
-      targetAmount: 25000,
-      raisedAmount: 22000,
-      status: 'active',
-      category: 'healthcare',
-      ngoName: 'Doctors Without Borders',
-      endDate: '2026-07-15',
-      imageUrl: '/api/placeholder/400/200',
-    },
-    {
-      id: '3',
-      title: 'Education Initiative in Rural Areas',
-      description: 'Building schools and providing educational resources to underserved rural communities.',
-      targetAmount: 100000,
-      raisedAmount: 89000,
-      status: 'active',
-      category: 'education',
-      ngoName: 'UNICEF',
-      endDate: '2026-08-01',
-      imageUrl: '/api/placeholder/400/200',
-    },
-    {
-      id: '4',
-      title: 'Food Security Program',
-      description: 'Ensuring food security for vulnerable populations through sustainable farming initiatives.',
-      targetAmount: 75000,
-      raisedAmount: 45000,
-      status: 'active',
-      category: 'food',
-      ngoName: 'World Food Programme',
-      endDate: '2026-09-01',
-      imageUrl: '/api/placeholder/400/200',
-    },
-    {
-      id: '5',
-      title: 'Shelter for Refugees',
-      description: 'Providing temporary shelter and essential supplies to displaced families.',
-      targetAmount: 150000,
-      raisedAmount: 120000,
-      status: 'active',
-      category: 'shelter',
-      ngoName: 'UNHCR',
-      endDate: '2026-10-15',
-      imageUrl: '/api/placeholder/400/200',
-    },
-    {
-      id: '6',
-      title: 'Clean Water Initiative',
-      description: 'Installing water purification systems in communities lacking access to clean drinking water.',
-      targetAmount: 60000,
-      raisedAmount: 58000,
-      status: 'active',
-      category: 'other',
-      ngoName: 'Water.org',
-      endDate: '2026-07-30',
-      imageUrl: '/api/placeholder/400/200',
-    },
-  ], [])
+  // Backed by the cached GET /api/campaigns route (issue #59) rather than
+  // an inline mock array, so the caching layer actually gets exercised.
+  const { data: campaigns = [], isLoading, isError } = useCampaigns()
 
   const categories = ['all', 'emergency', 'healthcare', 'education', 'food', 'shelter', 'other']
   const availableNGOs = Array.from(new Set(campaigns.map((c) => c.ngoName)))
@@ -196,7 +125,23 @@ export default function CampaignsPage() {
           </TabsList>
         </Tabs>
 
+        {isLoading && (
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="h-64 rounded-lg border bg-muted/50 animate-pulse" />
+            ))}
+          </div>
+        )}
+
+        {isError && !isLoading && (
+          <div className="text-center py-12">
+            <h3 className="text-xl font-semibold mb-2">Couldn&apos;t load campaigns</h3>
+            <p className="text-muted-foreground">Please try refreshing the page.</p>
+          </div>
+        )}
+
         {/* Campaigns Grid */}
+        {!isLoading && !isError && (
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
           {filteredCampaigns.map((campaign) => (
             <Card key={campaign.id} className="flex flex-col hover:shadow-lg transition-shadow">
@@ -264,8 +209,9 @@ export default function CampaignsPage() {
             </Card>
           ))}
         </div>
+        )}
 
-        {filteredCampaigns.length === 0 && (
+        {!isLoading && !isError && filteredCampaigns.length === 0 && (
           <div className="text-center py-12">
             <Heart className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
             <h3 className="text-xl font-semibold mb-2">No campaigns found</h3>

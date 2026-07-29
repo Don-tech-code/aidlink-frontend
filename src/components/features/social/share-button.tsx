@@ -8,7 +8,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Share2, Twitter, Facebook, Linkedin, Link as LinkIcon, Check } from 'lucide-react'
+import { Share2, Twitter, Facebook, Linkedin, MessageCircle, Link as LinkIcon, Check } from 'lucide-react'
 import { toast } from 'sonner'
 
 interface ShareButtonProps {
@@ -20,9 +20,11 @@ interface ShareButtonProps {
 export function ShareButton({ title, description, url }: ShareButtonProps) {
   const [copied, setCopied] = useState(false)
   const shareUrl = url || (typeof window !== 'undefined' ? window.location.href : '')
+  const shareText = `${title} - ${description}`
 
   const shareUrls = {
-    twitter: `https://twitter.com/intent/tweet?text=${encodeURIComponent(title)}&url=${encodeURIComponent(shareUrl)}`,
+    twitter: `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(shareUrl)}`,
+    whatsapp: `https://wa.me/?text=${encodeURIComponent(`${shareText} ${shareUrl}`)}`,
     facebook: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`,
     linkedin: `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(shareUrl)}`,
   }
@@ -54,6 +56,10 @@ export function ShareButton({ title, description, url }: ShareButtonProps) {
         <DropdownMenuItem onClick={() => handleShare('twitter')}>
           <Twitter className="mr-2 h-4 w-4 text-blue-400" />
           Share on X
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => handleShare('whatsapp')}>
+          <MessageCircle className="mr-2 h-4 w-4 text-green-500" />
+          Share on WhatsApp
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => handleShare('facebook')}>
           <Facebook className="mr-2 h-4 w-4 text-blue-600" />

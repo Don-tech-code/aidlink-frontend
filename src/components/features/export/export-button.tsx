@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -7,6 +8,14 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Progress } from '@/components/ui/progress'
 import { Download, FileSpreadsheet, FileText } from 'lucide-react'
 import { toast } from 'sonner'
 import { useLocale } from 'next-intl'
@@ -22,7 +31,6 @@ export interface Transaction {
 }
 
 interface ExportButtonProps {
-  transactions: Transaction[]
   filename?: string
 }
 
@@ -52,49 +60,106 @@ export function ExportButton({ transactions, filename = 'donation-history' }: Ex
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
     const link = document.createElement('a')
-    link.href = URL.createObjectURL(blob)
-    link.download = `${filename}.csv`
+    link.href = url
+    link.download = `${filename}.${ext}`
     link.click()
-    URL.revokeObjectURL(link.href)
-
-    toast.success('Exported to CSV successfully')
+    URL.revokeObjectURL(url)
   }
 
-  const exportToJSON = () => {
-    if (transactions.length === 0) {
-      toast.error('No transactions to export')
+  const runExport = async (format: 'csv' | 'json') => {
+    if (!isConnected || !publicKey) {
+      toast.error('Connect your wallet before exporting')
       return
     }
 
-    const jsonContent = JSON.stringify(transactions, null, 2)
-    const blob = new Blob([jsonContent], { type: 'application/json;charset=utf-8;' })
-    const link = document.createElement('a')
-    link.href = URL.createObjectURL(blob)
-    link.download = `${filename}.json`
-    link.click()
-    URL.revokeObjectURL(link.href)
+    setIsExporting(true)
+    setProgress(0)
+    setStatusText('Fetching transactions from Horizon…')
 
-    toast.success('Exported to JSON successfully')
+    const exporter = new TransactionExporter()
+    let lastCursor = ''
+
+    try {
+      const result = await exporter.export(
+        publicKey,
+        (network ?? 'testnet') as StellarNetwork,
+        {
+          maxTransactions,
+          onProgress: (count) => {
+            setProgress(Math.min(95, Math.round((count / maxTransactions) * 100)))
+            setStatusText(`Fetching transactions from Horizon… (${count} fetched)`)
+          },
+        }
+      )
+
+      lastCursor = result.cursor
+      setStatusText('Generating export file…')
+      setProgress(98)
+
+      if (format === 'csv') {
+        const blob = await exporter.generateCsv(result, publicKey, (network ?? 'testnet') as StellarNetwork)
+        triggerDownload(blob, 'csv')
+      } else {
+        const blob = await exporter.generateJson(result, publicKey, (network ?? 'testnet') as StellarNetwork)
+        triggerDownload(blob, 'json')
+      }
+
+      setProgress(100)
+      setStatusText('Done!')
+      toast.success(
+        `Exported ${result.totalFetched} transaction${result.totalFetched !== 1 ? 's' : ''} as ${format.toUpperCase()}`
+      )
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error'
+      toast.error(`Export failed: ${message}${lastCursor ? ` — resume cursor: ${lastCursor}` : ''}`)
+    } finally {
+      setTimeout(() => {
+        setIsExporting(false)
+        setProgress(0)
+        setStatusText('')
+      }, 800)
+    }
   }
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm">
-          <Download className="mr-2 h-4 w-4" />
-          Export
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={exportToCSV}>
-          <FileSpreadsheet className="mr-2 h-4 w-4" />
-          Export as CSV
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={exportToJSON}>
-          <FileText className="mr-2 h-4 w-4" />
-          Export as JSON
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <>
+      {/* Progress dialog */}
+      <Dialog open={isExporting} onOpenChange={() => {}}>
+        <DialogContent
+          className="sm:max-w-md"
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onEscapeKeyDown={(e) => e.preventDefault()}
+        >
+          <DialogHeader>
+            <DialogTitle>Exporting Transactions</DialogTitle>
+            <DialogDescription>{statusText}</DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <Progress value={progress} className="h-2" />
+            <p className="mt-2 text-sm text-muted-foreground text-right">{progress}%</p>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Trigger dropdown */}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline" size="sm" disabled={isExporting}>
+            <Download className="mr-2 h-4 w-4" />
+            Export
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onClick={() => runExport('csv')}>
+            <FileSpreadsheet className="mr-2 h-4 w-4" />
+            Export as CSV
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => runExport('json')}>
+            <FileText className="mr-2 h-4 w-4" />
+            Export as JSON
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
   )
 }
