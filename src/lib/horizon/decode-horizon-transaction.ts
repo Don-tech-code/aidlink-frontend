@@ -1,9 +1,9 @@
+import { type Horizon, type xdr } from '@stellar/stellar-sdk'
 import {
-  encodeMuxedAccountToAddress,
-  StrKey,
-  xdr,
-  type Horizon,
-} from '@stellar/stellar-sdk'
+  decodeInvokeHostFunctionOp,
+  decodePaymentOp,
+  getEnvelopeOperations,
+} from './envelope-decode'
 
 /**
  * Dashboard-facing transaction shape used by `useRealTimeTransactions`.
@@ -22,124 +22,18 @@ export interface RealtimeTransaction {
 
 export type HorizonTransactionRecord = Horizon.ServerApi.TransactionRecord
 
-const STROOPS_PER_XLM = 10_000_000
-
-function stroopsToXlm(stroops: string | number | bigint): number {
-  return Number(stroops) / STROOPS_PER_XLM
-}
-
-function mapSorobanFunctionName(
-  functionName: string
-): RealtimeTransaction['type'] {
-  const name = functionName.toLowerCase()
-  if (name.includes('claim')) return 'claim'
-  if (name.includes('refund')) return 'refund'
-  if (name.includes('distribut')) return 'distribution'
-  if (name.includes('donate') || name.includes('donation') || name.includes('fund')) {
-    return 'donation'
-  }
-  return 'donation'
-}
-
-function getEnvelopeOperations(
-  envelopeXdr: string
-): xdr.Operation[] {
-  const envelope = xdr.TransactionEnvelope.fromXDR(envelopeXdr, 'base64')
-  switch (envelope.switch()) {
-    case xdr.EnvelopeType.envelopeTypeTx():
-      return envelope.v1().tx().operations()
-    case xdr.EnvelopeType.envelopeTypeTxV0():
-      return envelope.v0().tx().operations()
-    case xdr.EnvelopeType.envelopeTypeTxFeeBump(): {
-      const inner = envelope.feeBump().tx().innerTx()
-      if (inner.switch() === xdr.EnvelopeType.envelopeTypeTx()) {
-        return inner.v1().tx().operations()
-      }
-      return []
-    }
-    default:
-      return []
-  }
-}
-
-function contractIdFromAddress(address: xdr.ScAddress): string {
-  try {
-    if (address.switch() === xdr.ScAddressType.scAddressTypeContract()) {
-      return StrKey.encodeContract(address.contractId())
-    }
-    if (address.switch() === xdr.ScAddressType.scAddressTypeAccount()) {
-      const accountId = address.accountId()
-      if (accountId.switch() === xdr.PublicKeyType.publicKeyTypeEd25519()) {
-        return StrKey.encodeEd25519PublicKey(accountId.ed25519())
-      }
-    }
-  } catch {
-    // fall through
-  }
-  return 'unknown-contract'
-}
-
-function decodeInvokeHostFunction(
-  op: xdr.Operation,
-  connectedPublicKey: string,
-  tx: HorizonTransactionRecord,
-  opIndex: number
-): RealtimeTransaction | null {
-  const body = op.body()
-  if (body.switch() !== xdr.OperationType.invokeHostFunction()) {
-    return null
-  }
-
-  const invokeOp = body.invokeHostFunctionOp()
-  const hostFn = invokeOp.hostFunction()
-
-  let functionName = 'invoke'
-  let contractId = 'unknown-contract'
-
-  if (hostFn.switch() === xdr.HostFunctionType.hostFunctionTypeInvokeContract()) {
-    const invoke = hostFn.invokeContract()
-    functionName = invoke.functionName().toString()
-    contractId = contractIdFromAddress(invoke.contractAddress())
-  }
-
-  const type = mapSorobanFunctionName(functionName)
-  const source =
-    op.sourceAccount() != null
-      ? encodeMuxedAccountToAddress(op.sourceAccount()!, true)
-      : tx.source_account
-
-  const isOutgoing = source === connectedPublicKey
-
-  return {
-    id: `${tx.hash}-${opIndex}`,
-    type: isOutgoing && type === 'donation' ? 'distribution' : type,
-    to: contractId,
-    amount: 0,
-    status: tx.successful === false ? 'failed' : 'completed',
-    timestamp: new Date(tx.created_at),
-    txHash: tx.hash,
-  }
-}
-
 function decodePaymentOperation(
   op: xdr.Operation,
   connectedPublicKey: string,
   tx: HorizonTransactionRecord,
   opIndex: number
 ): RealtimeTransaction | null {
-  const body = op.body()
-  if (body.switch() !== xdr.OperationType.payment()) {
+  const decoded = decodePaymentOp(op, tx.source_account)
+  if (!decoded) {
     return null
   }
 
-  const payment = body.paymentOp()
-  const destination = encodeMuxedAccountToAddress(payment.destination(), true)
-  const source =
-    op.sourceAccount() != null
-      ? encodeMuxedAccountToAddress(op.sourceAccount()!, true)
-      : tx.source_account
-
-  const amount = stroopsToXlm(payment.amount().toString())
+  const { source, destination, amount } = decoded
   const isIncoming = destination === connectedPublicKey
   const isOutgoing = source === connectedPublicKey
 
@@ -154,6 +48,31 @@ function decodePaymentOperation(
     // Counterparty for the dashboard "To" column.
     to: isIncoming ? source : destination,
     amount,
+    status: tx.successful === false ? 'failed' : 'completed',
+    timestamp: new Date(tx.created_at),
+    txHash: tx.hash,
+  }
+}
+
+function decodeInvokeHostFunction(
+  op: xdr.Operation,
+  connectedPublicKey: string,
+  tx: HorizonTransactionRecord,
+  opIndex: number
+): RealtimeTransaction | null {
+  const decoded = decodeInvokeHostFunctionOp(op, tx.source_account)
+  if (!decoded) {
+    return null
+  }
+
+  const { source, contractId, type } = decoded
+  const isOutgoing = source === connectedPublicKey
+
+  return {
+    id: `${tx.hash}-${opIndex}`,
+    type: isOutgoing && type === 'donation' ? 'distribution' : type,
+    to: contractId,
+    amount: 0,
     status: tx.successful === false ? 'failed' : 'completed',
     timestamp: new Date(tx.created_at),
     txHash: tx.hash,
@@ -183,23 +102,13 @@ export function decodeHorizonTransaction(
 
   operations.forEach((op, opIndex) => {
     try {
-      const payment = decodePaymentOperation(
-        op,
-        connectedPublicKey,
-        tx,
-        opIndex
-      )
+      const payment = decodePaymentOperation(op, connectedPublicKey, tx, opIndex)
       if (payment) {
         results.push(payment)
         return
       }
 
-      const invoke = decodeInvokeHostFunction(
-        op,
-        connectedPublicKey,
-        tx,
-        opIndex
-      )
+      const invoke = decodeInvokeHostFunction(op, connectedPublicKey, tx, opIndex)
       if (invoke) {
         results.push(invoke)
       }
