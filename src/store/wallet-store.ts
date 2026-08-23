@@ -4,6 +4,9 @@ import type { PersistStorage } from 'zustand/middleware'
 import type { WalletState } from '@/types'
 import { getSorobanSDK } from '@/lib/soroban/sdk'
 
+/** 8 hours — wallet sessions are invalidated after this period of inactivity. */
+const SESSION_TTL_MS = 28_800_000
+
 interface WalletStore extends WalletState {
   connectedAt: number | null
   sessionTtlMs: number

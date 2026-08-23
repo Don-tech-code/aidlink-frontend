@@ -1,11 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { sorobanSDK, type InvokeContractParams, type InvokeContractResult } from '@/lib/soroban/sdk'
+import { getSorobanSDK, sorobanSDK, type InvokeContractParams, type InvokeContractResult } from '@/lib/soroban/sdk'
+import { useWalletStore } from '@/store/wallet-store'
 import { toast } from 'sonner'
 
 export function useBalance(accountId: string | null) {
+  const network = useWalletStore((s) => s.network)
   return useQuery({
-    queryKey: ['balance', accountId],
-    queryFn: () => sorobanSDK.getBalance(accountId || ''),
+    queryKey: ['balance', accountId, network],
+    queryFn: () => getSorobanSDK(network).getBalance(accountId || ''),
     enabled: !!accountId,
     staleTime: 30000,
   })
