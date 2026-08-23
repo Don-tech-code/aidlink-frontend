@@ -33,6 +33,7 @@ import {
   getLatestLedger,
   getLedgerDetails,
   batchGetLedgerTransactions,
+  getLedgerTransactions,
   paginateEvents,
   parseEventIndex,
   parseEventName,
@@ -246,12 +247,15 @@ export class SorobanIndexer {
         startLedger,
         contractAddress: this.config.contractAddress,
         limit: this.config.eventPageSize,
+        horizonUrl: this.config.horizonUrl,
         initialCursor: tracker.lastEventCursor || undefined,
         onPage: async (page) => {
           pageCount++;
 
           for (const event of page.events) {
-            const txHash = event.txHash ?? '';
+            // txHash is always a non-empty string after getEvents processing:
+            // either a real 64-char hex hash or a 'unresolved:<eventId>' sentinel.
+            const txHash = event.txHash;
             const contractAddress = event.contractId;
             const eventName = parseEventName(event.topic);
             const eventIndex = parseEventIndex(event.id);
@@ -311,6 +315,107 @@ export class SorobanIndexer {
       });
     } finally {
       this.isRunning = false;
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Public: resolveUnresolvedEvents
+  // -------------------------------------------------------------------------
+
+  /**
+   * Re-attempts txHash resolution for all ContractEvents that were stored
+   * with a sentinel txHash ('unresolved:<eventId>').
+   *
+   * Algorithm:
+   *   1. Fetch all rows with sentinel txHash from contractEventRepo.
+   *   2. Parse (ledgerSeq, txOrder) from the embedded eventId in each sentinel.
+   *   3. Group by ledgerSeq, fetch each ledger's transaction list from Horizon
+   *      once per ledger (same batching strategy as getEvents fallback).
+   *   4. For each successfully resolved hash, call contractEventRepo.updateTxHash
+   *      to re-key the row.
+   *   5. Log a warning for any events that remain unresolved after this cycle.
+   *
+   * This method is intended to be called periodically (e.g. at the start of
+   * each indexing cycle) to drain the sentinel backlog without blocking the
+   * primary event ingestion path.
+   */
+  async resolveUnresolvedEvents(): Promise<void> {
+    const sentinelEvents = contractEventRepo.findBySentinel();
+    if (sentinelEvents.length === 0) return;
+
+    logger.info('Re-resolution cycle: found sentinel events', {
+      count: sentinelEvents.length,
+    });
+
+    // Parse ledgerSeq and txOrder from each sentinel's embedded eventId.
+    // Sentinel format: 'unresolved:<eventId>' where eventId = '<ledger>-<txOrder>-<eventIdx>'
+    interface SentinelMeta {
+      ledgerSeq: number;
+      txOrder: number;
+      row: (typeof sentinelEvents)[number];
+    }
+
+    const parsedEvents: SentinelMeta[] = [];
+    for (const ev of sentinelEvents) {
+      // Strip 'unresolved:' prefix to get the raw eventId
+      const rawEventId = ev.txHash.slice('unresolved:'.length);
+      const parts = rawEventId.split('-');
+      if (parts.length < 3) continue;
+      const ledgerSeq = parseInt(parts[0], 10);
+      const txOrder = parseInt(parts[1], 10);
+      if (isNaN(ledgerSeq) || isNaN(txOrder)) continue;
+      parsedEvents.push({ ledgerSeq, txOrder, row: ev });
+    }
+
+    // Group by ledgerSeq
+    const ledgerToEvents = new Map<number, SentinelMeta[]>();
+    for (const meta of parsedEvents) {
+      let group = ledgerToEvents.get(meta.ledgerSeq);
+      if (!group) {
+        group = [];
+        ledgerToEvents.set(meta.ledgerSeq, group);
+      }
+      group.push(meta);
+    }
+
+    // Fetch each ledger's transactions once and resolve
+    const ledgerSeqs = Array.from(ledgerToEvents.keys());
+
+    await Promise.allSettled(
+      ledgerSeqs.map(async (ledgerSeq) => {
+        const group = ledgerToEvents.get(ledgerSeq)!;
+        try {
+          const txRecords = await getLedgerTransactions(this.config.horizonUrl, ledgerSeq);
+          // Horizon returns txs ordered asc; idx is 0-based txOrder
+          const txOrderToHash = new Map<number, string>();
+          txRecords.forEach((tx, idx) => txOrderToHash.set(idx, tx.hash));
+
+          for (const meta of group) {
+            const resolvedHash = txOrderToHash.get(meta.txOrder);
+            if (!resolvedHash) continue;
+
+            contractEventRepo.updateTxHash(
+              meta.row.txHash, // sentinel value
+              meta.row.contractAddress,
+              meta.row.eventName,
+              meta.row.ledgerSequence,
+              meta.row.eventIndex,
+              resolvedHash
+            );
+          }
+        } catch {
+          logger.warn('Re-resolution: could not fetch ledger transactions', { ledgerSeq });
+        }
+      })
+    );
+
+    const remaining = contractEventRepo.findBySentinel().length;
+    if (remaining > 0) {
+      logger.warn('Re-resolution cycle: events still unresolved after retry', {
+        remaining,
+      });
+    } else {
+      logger.info('Re-resolution cycle: all sentinels resolved');
     }
   }
 

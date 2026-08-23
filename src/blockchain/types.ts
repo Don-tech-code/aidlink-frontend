@@ -132,8 +132,18 @@ export interface SorobanEvent {
   topic: unknown[];
   value: unknown;
   inSuccessfulContractCall: boolean;
-  /** Resolved from id: <ledger>-<txIndex>-<eventIndex> */
-  txHash?: string;
+  /**
+   * Transaction hash for this event. Always a non-empty string:
+   *   - A valid 64-character lowercase hex string when the RPC node returns
+   *     txHash directly, or when a fallback Horizon lookup succeeds.
+   *   - A sentinel value `'unresolved:<eventId>'` when the fallback also fails,
+   *     ensuring the composite deduplication key is never '' and never collides
+   *     across events from different transactions.
+   *
+   * Callers can detect an unresolved sentinel with:
+   *   `txHash.startsWith('unresolved:')`
+   */
+  txHash: string;
 }
 
 /** Full response shape for `getEvents` */
