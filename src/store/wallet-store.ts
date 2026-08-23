@@ -1,8 +1,10 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { PersistStorage } from 'zustand/middleware'
 import type { WalletState } from '@/types'
 import { getSorobanSDK } from '@/lib/soroban/sdk'
+
+/** Default session lifetime: 24 hours in milliseconds */
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000
 
 interface WalletStore extends WalletState {
   connectedAt: number | null
@@ -11,11 +13,6 @@ interface WalletStore extends WalletState {
   disconnect: () => void
   switchNetwork: (network: 'mainnet' | 'testnet' | 'futurenet' | 'standalone') => void
 }
-
-type WalletPersistedState = Pick<
-  WalletStore,
-  'isConnected' | 'address' | 'network' | 'connectedAt'
->
 
 export const useWalletStore = create<WalletStore>()(
   persist(

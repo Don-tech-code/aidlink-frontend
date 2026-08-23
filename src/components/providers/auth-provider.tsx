@@ -47,8 +47,13 @@ export function useRole() {
 
 export function useRequireRole(allowedRoles: UserRole[]) {
   const { role, loading } = useRole();
+  const roleLoadingState = useAuthStore((s) => s.roleLoadingState);
 
-  if (!loading && (!role || !allowedRoles.includes(role))) {
+  // Only throw once we have a definitive loaded result — not while idle,
+  // loading, or in an error state.  This prevents the HOC from blocking
+  // access while the auth pipeline is still running (e.g. initial page load
+  // before fetchRole completes, or when the wallet is not yet connected).
+  if (roleLoadingState === 'loaded' && (!role || !allowedRoles.includes(role))) {
     throw new UnauthorizedError(`Access restricted to roles: ${allowedRoles.join(', ')}`);
   }
 

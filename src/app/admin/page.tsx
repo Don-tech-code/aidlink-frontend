@@ -1,31 +1,33 @@
 'use client';
 
+import React, { useState } from 'react';
 import { Navigation } from '@/components/layout/navigation'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { 
-  Users, 
-  ShieldCheck, 
-  Ban, 
-  Search, 
+import {
+  Users,
+  ShieldCheck,
+  Ban,
+  Search,
   TrendingUp,
   AlertCircle,
-  CheckCircle2,
   Clock,
-  MoreHorizontal
+  MoreHorizontal,
 } from 'lucide-react'
-import { useState } from 'react'
 import { toast } from 'sonner'
 import { formatAddress, formatAmount, formatDate } from '@/lib/utils'
 import { useLocale } from 'next-intl'
+import { withRequireRole } from '@/components/providers/auth-provider'
+import { beneficiaryRegistryClient } from '@/lib/soroban/beneficiary-registry'
 
-export default function AdminPage() {
+function AdminPage() {
   const locale = useLocale()
   const [searchQuery, setSearchQuery] = useState('')
+  const [loadingId, setLoadingId] = useState<string | null>(null)
 
   const pendingBeneficiaries = [
     {
@@ -85,42 +87,35 @@ export default function AdminPage() {
     { label: 'Active Campaigns', value: '12', icon: TrendingUp, change: '+2' },
     { label: 'Flagged Users', value: '3', icon: AlertCircle, change: '-1' },
   ]
-import React, { useState } from 'react';
-import { withRequireRole } from '@/components/providers/auth-provider';
-import { beneficiaryRegistryClient } from '@/lib/soroban/beneficiary-registry';
-import { toast } from 'sonner';
-
-function AdminPage() {
-  const [loadingId, setLoadingId] = useState<string | null>(null);
 
   const handleVerify = async (beneficiaryId: string) => {
-    setLoadingId(beneficiaryId);
+    setLoadingId(beneficiaryId)
     try {
-      await beneficiaryRegistryClient.updateVerificationStatus(beneficiaryId, 1);
-      toast.success(`Beneficiary ${beneficiaryId} verified on-chain.`);
+      await beneficiaryRegistryClient.updateVerificationStatus(beneficiaryId, 1)
+      toast.success(`Beneficiary ${beneficiaryId} verified on-chain.`)
     } catch (err) {
-      toast.error('Failed to verify beneficiary on contract');
+      toast.error('Failed to verify beneficiary on contract')
     } finally {
-      setLoadingId(null);
+      setLoadingId(null)
     }
-  };
+  }
 
   const handleSuspend = async (beneficiaryId: string) => {
-    setLoadingId(beneficiaryId);
+    setLoadingId(beneficiaryId)
     try {
-      await beneficiaryRegistryClient.updateVerificationStatus(beneficiaryId, 2);
-      toast.warning(`Beneficiary ${beneficiaryId} suspended.`);
+      await beneficiaryRegistryClient.updateVerificationStatus(beneficiaryId, 2)
+      toast.warning(`Beneficiary ${beneficiaryId} suspended.`)
     } catch (err) {
-      toast.error('Failed to suspend beneficiary on contract');
+      toast.error('Failed to suspend beneficiary on contract')
     } finally {
-      setLoadingId(null);
+      setLoadingId(null)
     }
-  };
+  }
 
   return (
     <div className="min-h-screen bg-background">
       <Navigation />
-      
+
       <main className="container py-8">
         <div className="mb-8">
           <h1 className="text-3xl font-bold mb-2">Admin Portal</h1>
@@ -131,7 +126,7 @@ function AdminPage() {
 
         {/* Stats Grid */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-8">
-          {stats.map((stat, index) => (
+          {stats.map((stat) => (
             <Card key={stat.label}>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">{stat.label}</CardTitle>
@@ -192,10 +187,20 @@ function AdminPage() {
                         <div className="flex gap-2">
                           <Button
                             size="sm"
-                            onClick={() => handleVerify(beneficiary.id)}
+                            onClick={() => handleVerify(beneficiary.walletAddress)}
+                            disabled={loadingId === beneficiary.walletAddress}
                           >
                             <ShieldCheck className="mr-2 h-4 w-4" />
                             Verify
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => handleSuspend(beneficiary.walletAddress)}
+                            disabled={loadingId === beneficiary.walletAddress}
+                          >
+                            <Ban className="mr-2 h-4 w-4" />
+                            Suspend
                           </Button>
                           <Button size="sm" variant="outline">
                             <MoreHorizontal className="h-4 w-4" />
@@ -222,7 +227,10 @@ function AdminPage() {
                           By {campaign.organizer}
                         </div>
                         <div className="flex items-center gap-4 text-sm">
-                          <span>{formatAmount(campaign.raisedAmount, 2, locale)} / {formatAmount(campaign.targetAmount, 2, locale)} XLM</span>
+                          <span>
+                            {formatAmount(campaign.raisedAmount, 2, locale)} /{' '}
+                            {formatAmount(campaign.targetAmount, 2, locale)} XLM
+                          </span>
                           <Badge variant="secondary">{campaign.status}</Badge>
                         </div>
                       </div>
@@ -268,7 +276,8 @@ function AdminPage() {
                           <Button
                             size="sm"
                             variant="destructive"
-                            onClick={() => handleSuspend(user.id)}
+                            onClick={() => handleSuspend(user.walletAddress)}
+                            disabled={loadingId === user.walletAddress}
                           >
                             <Ban className="mr-2 h-4 w-4" />
                             Suspend
@@ -286,34 +295,8 @@ function AdminPage() {
           </TabsContent>
         </Tabs>
       </main>
-    <div className="container mx-auto p-6 space-y-6">
-      <h1 className="text-3xl font-bold">Admin Dashboard</h1>
-      <p className="text-muted-foreground">Manage beneficiary verifications and platform security.</p>
-      
-      <div className="border rounded-lg p-4 bg-card space-y-4">
-        <h2 className="text-xl font-semibold">Beneficiary Actions</h2>
-        <div className="flex items-center justify-between p-3 border rounded">
-          <span>Beneficiary ID: G_EXAMPLE_BENEFICIARY</span>
-          <div className="space-x-2">
-            <button
-              onClick={() => handleVerify('G_EXAMPLE_BENEFICIARY')}
-              disabled={loadingId === 'G_EXAMPLE_BENEFICIARY'}
-              className="px-3 py-1 bg-green-600 text-white rounded text-sm disabled:opacity-50"
-            >
-              Verify
-            </button>
-            <button
-              onClick={() => handleSuspend('G_EXAMPLE_BENEFICIARY')}
-              disabled={loadingId === 'G_EXAMPLE_BENEFICIARY'}
-              className="px-3 py-1 bg-red-600 text-white rounded text-sm disabled:opacity-50"
-            >
-              Suspend
-            </button>
-          </div>
-        </div>
-      </div>
     </div>
-  );
+  )
 }
 
-export default withRequireRole(AdminPage, ['admin']);
+export default withRequireRole(AdminPage, ['admin'])

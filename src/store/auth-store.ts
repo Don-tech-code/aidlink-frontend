@@ -48,6 +48,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         id: publicKey,
         walletAddress: publicKey,
         role: role || 'donor',
+        // name and createdAt are required by the User interface but not
+        // available from an on-chain role lookup; use sensible defaults.
+        name: publicKey,
+        createdAt: new Date().toISOString(),
       };
 
       setRoleCookie(user.role);

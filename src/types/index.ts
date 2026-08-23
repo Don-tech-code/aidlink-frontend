@@ -69,10 +69,12 @@ export interface Transaction {
   txHash?: string
 }
 
+export type UserRole = 'donor' | 'ngo' | 'beneficiary' | 'admin'
+
 export interface User {
   id: string
   walletAddress: string
-  role: 'donor' | 'ngo' | 'beneficiary' | 'admin'
+  role: UserRole
   name: string
   email?: string
   createdAt: string
