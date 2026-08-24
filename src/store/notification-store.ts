@@ -42,6 +42,32 @@ function reviveNotificationTimestamps(
   }))
 }
 
+// Notification deduplication and throttling
+const NOTIFICATION_THROTTLE_MS = 3000 // Minimum 3 seconds between identical notifications
+const recentNotifications = new Map<string, number>() // type -> timestamp
+
+function isNotificationThrottled(notification: Omit<Notification, 'id' | 'timestamp' | 'read'>): boolean {
+  const key = `${notification.type}:${notification.title}`
+  const now = Date.now()
+  const lastTime = recentNotifications.get(key)
+
+  if (lastTime && now - lastTime < NOTIFICATION_THROTTLE_MS) {
+    return true
+  }
+
+  recentNotifications.set(key, now)
+
+  // Cleanup old entries every 100 notifications
+  if (recentNotifications.size > 100) {
+    const cutoff = now - NOTIFICATION_THROTTLE_MS * 2
+    for (const [k, v] of recentNotifications) {
+      if (v < cutoff) recentNotifications.delete(k)
+    }
+  }
+
+  return false
+}
+
 export const useNotificationStore = create<NotificationStore>()(
   persist(
     (set) => ({
@@ -50,6 +76,11 @@ export const useNotificationStore = create<NotificationStore>()(
 
       addNotification: (notification) =>
         set((state) => {
+          // Throttle duplicate notifications
+          if (isNotificationThrottled(notification)) {
+            return state
+          }
+
           let notifications = state.notifications
           let unreadCount = state.unreadCount + 1
 
