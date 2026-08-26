@@ -21,16 +21,9 @@ type DonationOperation = {
   campaignId: string | null;
 };
 
-type HorizonPaymentRecord = Horizon.ServerApi.OperationRecord & {
-  transaction_hash?: string;
-  transaction_successful?: boolean;
-  created_at?: string;
-  paging_token: string;
-  memo?: string;
-};
-
-type HorizonTransactionRecord = Horizon.ServerApi.TransactionRecord & {
-  memo?: string;
+type AnalyticsCursor = {
+  lastCursor: string | null;
+  lastFetchTime: string | null;
 };
 
 const DONOR_RANGES = [
@@ -39,6 +32,13 @@ const DONOR_RANGES = [
   { range: '501-1000', min: 501, max: 1000 },
   { range: '1000+', min: 1001, max: Number.POSITIVE_INFINITY },
 ] as const;
+
+const MAX_RECORDS = parseInt(
+  (typeof process !== 'undefined' && (process.env as Record<string, string | undefined>)?.ANALYTICS_MAX_RECORDS) || '5000',
+  10,
+);
+
+const RATE_LIMIT_DELAY_MS = 110;
 
 function env(key: string): string {
   try {
@@ -70,30 +70,6 @@ function getHorizonUrl(): string {
   return NETWORKS.TESTNET;
 }
 
-function getRecordAmount(record: HorizonPaymentRecord): number | null {
-  if (record.type === 'payment') {
-    return Number.parseFloat((record as Horizon.ServerApi.PaymentOperationRecord).amount ?? '0');
-  }
-
-  if (record.type === 'create_account') {
-    return Number.parseFloat((record as Horizon.ServerApi.CreateAccountOperationRecord).starting_balance ?? '0');
-  }
-
-  return null;
-}
-
-function getRecordDonor(record: HorizonPaymentRecord): string | null {
-  if (record.type === 'payment') {
-    return (record as Horizon.ServerApi.PaymentOperationRecord).from ?? null;
-  }
-
-  if (record.type === 'create_account') {
-    return (record as Horizon.ServerApi.CreateAccountOperationRecord).funder ?? null;
-  }
-
-  return (record as { source_account?: string }).source_account ?? null;
-}
-
 function decodeCampaignId(memo?: string | null): string | null {
   if (typeof memo === 'string' && memo.startsWith('campaign:')) {
     return memo.slice('campaign:'.length).trim() || null;
@@ -102,73 +78,172 @@ function decodeCampaignId(memo?: string | null): string | null {
   return null;
 }
 
-async function getTransactionMemo(
-  server: Horizon.Server,
-  transactionHash: string,
-  memoCache: Map<string, string | null>
-): Promise<string | null> {
-  if (memoCache.has(transactionHash)) {
-    return memoCache.get(transactionHash) ?? null;
-  }
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
+function decodeAmountFromXDR(envelopeXdr: string): number | null {
   try {
-    const transaction = (await server
-      .transactions()
-      .transaction(transactionHash)
-      .call()) as HorizonTransactionRecord;
-    const memo = typeof transaction.memo === 'string' ? transaction.memo : null;
-    memoCache.set(transactionHash, memo);
-    return memo;
+    const xdr = typeof window !== 'undefined'
+      ? (window as any).__stellar_xdr
+      : null;
+
+    if (!xdr) return null;
+
+    const envelope = xdr.TransactionEnvelope.fromXDR(envelopeXdr, 'base64');
+    const tx = envelope.v1()?.tx() || envelope.feeBump()?.tx()?.innerTx()?.v1()?.tx();
+    if (!tx) return null;
+
+    for (const op of tx.operations()) {
+      const body = op.body();
+      if (body.switch() === 1) {
+        const payment = body.paymentOp();
+        const amount = payment.amount().shifted().toNumber();
+        return amount;
+      }
+    }
+
+    return null;
   } catch {
-    memoCache.set(transactionHash, null);
     return null;
   }
 }
 
-async function mapDonationOperation(
+function getDonorFromXDR(envelopeXdr: string): string | null {
+  try {
+    const xdr = typeof window !== 'undefined'
+      ? (window as any).__stellar_xdr
+      : null;
+
+    if (!xdr) return null;
+
+    const envelope = xdr.TransactionEnvelope.fromXDR(envelopeXdr, 'base64');
+    const tx = envelope.v1()?.tx() || envelope.feeBump()?.tx()?.innerTx()?.v1()?.tx();
+    if (!tx) return null;
+
+    const sourceAccount = tx.sourceAccount().accountId();
+    return sourceAccount;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchTransactionsPage(
   server: Horizon.Server,
-  record: HorizonPaymentRecord,
-  memoCache: Map<string, string | null>
-): Promise<DonationOperation | null> {
-  if (record.transaction_successful === false) return null;
+  account: string,
+  cursor?: string | null,
+  limit: number = 200,
+): Promise<{ records: any[]; nextCursor: string | null }> {
+  try {
+    let builder = server
+      .transactions()
+      .forAccount(account)
+      .limit(limit)
+      .order('desc');
 
-  const amount = getRecordAmount(record);
-  if (amount === null || Number.isNaN(amount) || amount <= 0) return null;
+    if (cursor) {
+      builder = builder.cursor(cursor);
+    }
 
-  const donor = getRecordDonor(record);
-  if (!donor) return null;
+    const page = await builder.call();
+    return {
+      records: page.records,
+      nextCursor: page.next?.()?.cursor?.() ?? null,
+    };
+  } catch {
+    return { records: [], nextCursor: null };
+  }
+}
 
-  const transactionHash = record.transaction_hash || record.paging_token;
-  const memo = record.memo ?? (await getTransactionMemo(server, transactionHash, memoCache));
+function mapTransactionToDonation(
+  record: any,
+  campaignId: string,
+): DonationOperation | null {
+  const memo = typeof record.memo === 'string' ? record.memo : null;
+  const memoCampaignId = decodeCampaignId(memo);
+
+  if (memoCampaignId !== campaignId) return null;
+
+  const transactionHash = record.hash;
+  if (!transactionHash) return null;
+
+  const sourceAccount = record.source_account;
+  if (!sourceAccount) return null;
+
+  const operations = record.operation_count ?? 0;
+  if (operations === 0) return null;
 
   return {
     transactionHash,
-    donor,
-    amount,
+    donor: sourceAccount,
+    amount: 0,
     createdAt: record.created_at ?? new Date(0).toISOString(),
-    campaignId: decodeCampaignId(memo),
+    campaignId: memoCampaignId,
   };
 }
 
-async function fetchDonationOperations(account: string): Promise<DonationOperation[]> {
-  if (!account) return [];
+async function fetchCampaignTransactions(
+  server: Horizon.Server,
+  account: string,
+  campaignId: string,
+  startCursor?: string | null,
+  maxRecords: number = MAX_RECORDS,
+): Promise<{ operations: DonationOperation[]; lastCursor: string | null }> {
+  const operations: DonationOperation[] = [];
+  const seenHashes = new Set<string>();
+  let currentCursor = startCursor;
+  let pagesFetched = 0;
+  const maxPages = Math.ceil(maxRecords / 200);
 
-  const server = new Horizon.Server(getHorizonUrl());
-  const donations: DonationOperation[] = [];
-  const memoCache = new Map<string, string | null>();
+  while (pagesFetched < maxPages && operations.length < maxRecords) {
+    const { records, nextCursor } = await fetchTransactionsPage(
+      server,
+      account,
+      currentCursor,
+    );
 
-  let page = await server.payments().forAccount(account).limit(200).order('desc').call();
+    if (records.length === 0) break;
 
-  while (page.records.length > 0) {
-    for (const record of page.records) {
-      const donation = await mapDonationOperation(server, record as HorizonPaymentRecord, memoCache);
-      if (donation) donations.push(donation);
+    for (const record of records) {
+      const memo = typeof record.memo === 'string' ? record.memo : null;
+      const memoCampaignId = decodeCampaignId(memo);
+
+      if (memoCampaignId !== campaignId) continue;
+
+      const transactionHash = record.hash;
+      if (!transactionHash || seenHashes.has(transactionHash)) continue;
+
+      seenHashes.add(transactionHash);
+
+      const sourceAccount = record.source_account;
+      if (!sourceAccount) continue;
+
+      const operationCount = record.operation_count ?? 0;
+      if (operationCount === 0) continue;
+
+      operations.push({
+        transactionHash,
+        donor: sourceAccount,
+        amount: 0,
+        createdAt: record.created_at ?? new Date(0).toISOString(),
+        campaignId: memoCampaignId,
+      });
+
+      if (operations.length >= maxRecords) break;
     }
 
-    page = await page.next();
+    pagesFetched++;
+    currentCursor = nextCursor;
+
+    if (!nextCursor) break;
+
+    await sleep(RATE_LIMIT_DELAY_MS);
   }
 
-  return donations;
+  return {
+    operations,
+    lastCursor: currentCursor,
+  };
 }
 
 function aggregateAnalytics(campaignId: string, operations: DonationOperation[]): CampaignAnalytics {
@@ -214,9 +289,38 @@ function aggregateAnalytics(campaignId: string, operations: DonationOperation[])
   };
 }
 
-async function fetchCampaignAnalytics(campaignId: string): Promise<CampaignAnalytics> {
-  const operations = await fetchDonationOperations(getAnalyticsAccount());
-  return aggregateAnalytics(campaignId, operations);
+async function fetchCampaignAnalytics(
+  campaignId: string,
+  cursor?: string | null,
+): Promise<CampaignAnalytics & { nextCursor: string | null }> {
+  const account = getAnalyticsAccount();
+  if (!account) {
+    return {
+      campaignId,
+      totalDonations: 0,
+      totalAmount: 0,
+      uniqueDonors: 0,
+      averageDonation: 0,
+      dailyDonations: [],
+      donorDistribution: DONOR_RANGES.map(({ range }) => ({ range, count: 0 })),
+      nextCursor: null,
+    };
+  }
+
+  const server = new Horizon.Server(getHorizonUrl());
+  const { operations, lastCursor } = await fetchCampaignTransactions(
+    server,
+    account,
+    campaignId,
+    cursor,
+  );
+
+  const analytics = aggregateAnalytics(campaignId, operations);
+
+  return {
+    ...analytics,
+    nextCursor: lastCursor,
+  };
 }
 
 export function useAnalytics(campaignId?: string) {
