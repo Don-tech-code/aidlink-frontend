@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { FeeConfirmationDialog } from '@/components/beneficiary/FeeConfirmationDialog'
 import { useClaim } from '@/hooks/use-claim'
-import { generateClaimToken, isTokenExpiredSync, stroopsToXlm, formatClaimFeeXlm } from '@/lib/beneficiary/claim-token'
+import { isTokenExpiredSync, stroopsToXlm, formatClaimFeeXlm } from '@/lib/beneficiary/claim-token'
 import type { Allocation } from '@/types'
 
 interface AllocationCardProps {
@@ -30,12 +30,20 @@ export function AllocationCard({ allocation, beneficiaryAddress }: AllocationCar
     setTokenLoading(true)
     setTokenError(null)
     try {
-      const token = await generateClaimToken(
-        allocation.claimId,
-        beneficiaryAddress,
-        allocation.campaignId,
-        allocation.allocatedAmountStroops,
-      )
+      // Token signing happens server-side (the HMAC secret never reaches the
+      // browser); the QR code is rendered from the token this route returns.
+      const res = await fetch('/api/v1/claim-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          claimId: allocation.claimId,
+          beneficiaryAddress,
+          campaignId: allocation.campaignId,
+          allocatedAmountStroops: String(allocation.allocatedAmountStroops),
+        }),
+      })
+      if (!res.ok) throw new Error(`token request failed (${res.status})`)
+      const { token } = (await res.json()) as { token: string }
       setClaimToken(token)
     } catch {
       setTokenError('Failed to generate claim token. Please refresh the page.')

@@ -27,9 +27,10 @@ jest.mock('@/store/wallet-store', () => ({
   useWalletStore: jest.fn(),
 }))
 
-// Mock claim token functions
+// Mock claim token functions. Signature verification now runs server-side, so
+// the hook no longer imports validateClaimToken from this module — it POSTs to
+// /api/v1/claim-token/validate (mocked via global.fetch below).
 jest.mock('@/lib/beneficiary/claim-token', () => ({
-  validateClaimToken: jest.fn(),
   isTokenExpiredSync: jest.fn(),
   stroopsToXlm: (s: number | bigint | string) => Number(s) / 10_000_000,
   formatClaimFeeXlm: (xlm: number) => `${xlm.toFixed(7)} XLM`,
@@ -90,19 +91,31 @@ jest.mock('@stellar/stellar-sdk', () => {
 // Now import after mocks are set up
 import { useClaim, __setPollDelayMs } from '@/hooks/use-claim'
 import { useWalletStore } from '@/store/wallet-store'
-import { validateClaimToken, isTokenExpiredSync } from '@/lib/beneficiary/claim-token'
+import { isTokenExpiredSync } from '@/lib/beneficiary/claim-token'
 import { simulateClaim, AlreadyClaimedError } from '@/lib/beneficiary/allocations'
 import { signTransaction } from '@stellar/freighter-api'
 import { TransactionBuilder } from '@stellar/stellar-sdk'
-import type { Allocation } from '@/types'
+import type { Allocation, ClaimTokenValidation } from '@/types'
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 const mockUseWalletStore = useWalletStore as jest.MockedFunction<typeof useWalletStore>
-const mockValidateClaimToken = validateClaimToken as jest.MockedFunction<typeof validateClaimToken>
 const mockIsTokenExpiredSync = isTokenExpiredSync as jest.MockedFunction<typeof isTokenExpiredSync>
 const mockSimulateClaim = simulateClaim as jest.MockedFunction<typeof simulateClaim>
 const mockSignTransaction = signTransaction as jest.MockedFunction<typeof signTransaction>
+
+// The hook validates tokens by POSTing to /api/v1/claim-token/validate.
+// Mock fetch so each test can drive the ClaimTokenValidation the route returns.
+const mockFetch = jest.fn()
+global.fetch = mockFetch as unknown as typeof fetch
+
+function mockValidation(result: ClaimTokenValidation): void {
+  mockFetch.mockResolvedValue({
+    ok: true,
+    status: 200,
+    json: async () => result,
+  })
+}
 
 const WALLET_ADDRESS = 'GDQOE23CFSUMSVQK4Y5JHPPYK73VYCNHZHA7ENKCV37P6SUEO6XQBKPP'
 const VALID_TX_HASH = 'a'.repeat(64)
@@ -140,7 +153,7 @@ beforeEach(() => {
   setupWallet()
   // Default: token is fresh and valid for this wallet
   mockIsTokenExpiredSync.mockReturnValue(false)
-  mockValidateClaimToken.mockResolvedValue({
+  mockValidation({
     valid: true,
     payload: {
       claimId: 'claim-001',
@@ -217,7 +230,7 @@ describe('token expiry gating', () => {
 
   it('transitions to token-expired when validateClaimToken returns expired', async () => {
     mockIsTokenExpiredSync.mockReturnValue(false)
-    mockValidateClaimToken.mockResolvedValue({
+    mockValidation({
       valid: false,
       reason: 'expired',
       message: 'This claim token has expired. Refresh the page for a new one.',
@@ -240,7 +253,7 @@ describe('token expiry gating', () => {
 
 describe('wrong wallet address', () => {
   it('transitions to not-your-claim when validateClaimToken returns wrong-address', async () => {
-    mockValidateClaimToken.mockResolvedValue({
+    mockValidation({
       valid: false,
       reason: 'wrong-address',
       message: 'This claim token is not for the connected wallet.',
