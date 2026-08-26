@@ -4,8 +4,11 @@ import type { PersistStorage } from 'zustand/middleware'
 import type { WalletState } from '@/types'
 import { getSorobanSDK } from '@/lib/soroban/sdk'
 
-/** 8 hours — wallet sessions are invalidated after this period of inactivity. */
-const SESSION_TTL_MS = 28_800_000
+/**
+ * Session TTL: 8 hours. Matches the value asserted in
+ * src/lib/store/__tests__/encrypted-storage.test.ts's TTL-expiry test.
+ */
+const SESSION_TTL_MS = 8 * 60 * 60 * 1000
 
 interface WalletStore extends WalletState {
   connectedAt: number | null

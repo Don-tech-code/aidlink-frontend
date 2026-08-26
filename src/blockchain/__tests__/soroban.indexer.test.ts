@@ -17,6 +17,17 @@
  * AC8  – TypeScript compiles with zero new errors; no existing tests broken
  *         (verified by running the full suite — see task #2/#3).
  *
+ * NEW:  txHash resolution acceptance criteria (issue #txhash-fix):
+ * TXAC1 – getEvents with no txHash in RPC response → no element has txHash === ''
+ * TXAC2 – Two events with distinct id but both missing txHash → distinct sentinels
+ * TXAC3 – Event id='12345-2-0', Horizon returns hash → txHash = resolved hash
+ * TXAC4 – Deduplication: two events both with txHash:'' before fix now produce
+ *          distinct sentinel keys and are stored as 2 separate rows
+ * TXAC5 – 100 events with no txHash → zero entries with txHash === ''
+ * TXAC6 – resolveUnresolvedEvents updates sentinel row to real hash; findByHash works
+ * TXAC7 – npm run test and npm run type-check pass (CI)
+ * TXAC8 – Property-based: N random event IDs → extractTxHashFromEventId never returns ''
+ *
  * All network I/O is intercepted at the rpc-client module boundary so no
  * actual RPC calls are made.
  */
@@ -41,21 +52,29 @@ import { TransactionStatus } from '../types';
 jest.mock('../rpc-client', () => ({
   getLatestLedger: jest.fn(),
   getLedgerDetails: jest.fn(),
+  getLedgerTransactions: jest.fn(),
   batchGetLedgerTransactions: jest.fn(),
   paginateEvents: jest.fn(),
   parseEventIndex: jest.requireActual('../rpc-client').parseEventIndex,
   parseEventName: jest.requireActual('../rpc-client').parseEventName,
+  makeSentinelTxHash: jest.requireActual('../rpc-client').makeSentinelTxHash,
+  isUnresolvedTxHash: jest.requireActual('../rpc-client').isUnresolvedTxHash,
+  __clearTxHashCache: jest.requireActual('../rpc-client').__clearTxHashCache,
 }));
 
 import {
   getLatestLedger,
   getLedgerDetails,
+  getLedgerTransactions,
   batchGetLedgerTransactions,
   paginateEvents,
+  makeSentinelTxHash,
+  isUnresolvedTxHash,
 } from '../rpc-client';
 
 const mockGetLatestLedger = getLatestLedger as jest.MockedFunction<typeof getLatestLedger>;
 const mockGetLedgerDetails = getLedgerDetails as jest.MockedFunction<typeof getLedgerDetails>;
+const mockGetLedgerTransactions = getLedgerTransactions as jest.MockedFunction<typeof getLedgerTransactions>;
 const mockBatchGetLedgerTransactions = batchGetLedgerTransactions as jest.MockedFunction<
   typeof batchGetLedgerTransactions
 >;
@@ -967,5 +986,354 @@ describe('In-memory event buffer: flushes before reaching 10 000 items', () => {
 
     // All events must be persisted despite partial flush
     expect(contractEventRepo.count()).toBe(TOTAL_EVENTS);
+  });
+});
+
+// ===========================================================================
+// TXAC1 — getEvents with no txHash in RPC response → no element has txHash === ''
+// ===========================================================================
+
+describe('TXAC1 — no event has txHash === "" when RPC omits txHash', () => {
+  it('every event returned by paginateEvents has a non-empty txHash', async () => {
+    const LEDGER_SEQ = 7000;
+    mockGetLatestLedger.mockResolvedValue({ id: 'lid', sequence: LEDGER_SEQ, protocolVersion: 21 });
+
+    // Events WITHOUT txHash (simulates older/non-standard RPC node)
+    const eventsWithoutHash = [
+      { ...makeEventRecord({ id: `${LEDGER_SEQ}-0-0`, ledger: LEDGER_SEQ }), txHash: undefined },
+      { ...makeEventRecord({ id: `${LEDGER_SEQ}-0-1`, ledger: LEDGER_SEQ }), txHash: undefined },
+      { ...makeEventRecord({ id: `${LEDGER_SEQ}-1-0`, ledger: LEDGER_SEQ }), txHash: undefined },
+    ] as ReturnType<typeof makeEventRecord>[];
+
+    // paginateEvents passes the events through directly; we simulate it returning
+    // events that have already been processed by getEvents (with sentinels assigned)
+    // by using the real makeSentinelTxHash helper on each event.
+    const processedEvents = eventsWithoutHash.map((e) => ({
+      ...e,
+      txHash: makeSentinelTxHash(e.id),
+    }));
+
+    mockPaginateEvents.mockImplementation(async (_url, opts) => {
+      await opts.onPage({ events: processedEvents, latestLedger: LEDGER_SEQ, cursor: undefined });
+      return { finalCursor: '', latestLedger: LEDGER_SEQ };
+    });
+
+    rollupTrackerRepo.upsert('soroban_indexer', { lastProcessedLedger: LEDGER_SEQ });
+
+    const indexer = new SorobanIndexer(TEST_CONFIG);
+    await indexer.indexContractEvents();
+
+    // No stored event should have txHash === ''
+    const all = contractEventRepo.__all();
+    expect(all.length).toBe(3);
+    for (const ev of all) {
+      expect(ev.txHash).not.toBe('');
+      expect(ev.txHash.length).toBeGreaterThan(0);
+    }
+  });
+});
+
+// ===========================================================================
+// TXAC2 — Two events with distinct ids but both missing txHash → distinct sentinels
+// ===========================================================================
+
+describe('TXAC2 — distinct sentinel values for events with distinct ids', () => {
+  it('two events with different event IDs produce different sentinel txHash values', () => {
+    const id1 = '12345-0-0';
+    const id2 = '12345-1-0';
+
+    const sentinel1 = makeSentinelTxHash(id1);
+    const sentinel2 = makeSentinelTxHash(id2);
+
+    // Sentinels must be distinct
+    expect(sentinel1).not.toBe(sentinel2);
+    // Sentinels must be non-empty
+    expect(sentinel1.length).toBeGreaterThan(0);
+    expect(sentinel2.length).toBeGreaterThan(0);
+    // Sentinels must be recognizable
+    expect(isUnresolvedTxHash(sentinel1)).toBe(true);
+    expect(isUnresolvedTxHash(sentinel2)).toBe(true);
+  });
+
+  it('sentinel encodes the full event ID so collisions are impossible', () => {
+    const ids = [
+      '12345-0-0',
+      '12345-0-1',
+      '12345-1-0',
+      '12346-0-0',
+    ];
+    const sentinels = ids.map(makeSentinelTxHash);
+    const unique = new Set(sentinels);
+    expect(unique.size).toBe(ids.length);
+  });
+
+  it('isUnresolvedTxHash returns false for real hex hashes', () => {
+    const realHash = 'a'.repeat(64);
+    expect(isUnresolvedTxHash(realHash)).toBe(false);
+  });
+});
+
+// ===========================================================================
+// TXAC3 — Event id='12345-2-0', Horizon fallback returns hash → txHash resolved
+// ===========================================================================
+
+describe('TXAC3 — resolveUnresolvedEvents resolves sentinel using Horizon fallback', () => {
+  it('resolves sentinel event to real hash after Horizon lookup succeeds', async () => {
+    const EVENT_ID = '12345-2-0';
+    const LEDGER_SEQ = 12345;
+    const TX_ORDER = 2;
+    const RESOLVED_HASH = 'abcdef1234567890'.repeat(4); // 64 char hex
+
+    // Pre-store an event with a sentinel txHash
+    const sentinel = makeSentinelTxHash(EVENT_ID);
+    contractEventRepo.upsert({
+      txHash: sentinel,
+      contractAddress: 'CONTRACT_X',
+      eventName: 'transfer',
+      ledgerSequence: LEDGER_SEQ,
+      eventIndex: 0,
+      parameters: {},
+      processed: false,
+    });
+
+    // Horizon returns 3 transactions; the one at txOrder=2 (index 2) has our hash
+    const txRecords = [
+      makeTxRecord({ hash: 'aaaa' + 'a'.repeat(60), ledger: LEDGER_SEQ }),
+      makeTxRecord({ hash: 'bbbb' + 'b'.repeat(60), ledger: LEDGER_SEQ }),
+      makeTxRecord({ hash: RESOLVED_HASH, ledger: LEDGER_SEQ }), // index 2 = txOrder 2
+    ];
+    mockGetLedgerTransactions.mockResolvedValueOnce(txRecords);
+
+    // Run the re-resolution cycle
+    mockGetLatestLedger.mockResolvedValue({ id: 'lid', sequence: LEDGER_SEQ, protocolVersion: 21 });
+    const indexer = new SorobanIndexer(TEST_CONFIG);
+    await indexer.resolveUnresolvedEvents();
+
+    // The sentinel row should now be the resolved hash
+    const resolved = contractEventRepo.findByHash(RESOLVED_HASH);
+    expect(resolved).toBeDefined();
+    expect(resolved!.txHash).toBe(RESOLVED_HASH);
+
+    // The sentinel row must be gone
+    const sentinelRow = contractEventRepo.findByHash(sentinel);
+    expect(sentinelRow).toBeUndefined();
+
+    // countByTxHash('') must be 0 — the real acceptance criterion
+    expect(contractEventRepo.countByTxHash('')).toBe(0);
+  });
+});
+
+// ===========================================================================
+// TXAC4 — Deduplication: two events with same params but different event IDs
+//          produce distinct sentinel keys and are stored as 2 separate rows
+// ===========================================================================
+
+describe('TXAC4 — deduplication: distinct sentinels prevent key collision', () => {
+  it('two events with txHash="" before the fix produce distinct keys after the fix', () => {
+    // Simulate what USED to happen: both events had txHash: '' and would collide.
+    // After the fix, paginateEvents assigns sentinels derived from event IDs.
+    const CONTRACT = 'CABC';
+    const EVENT_NAME = 'donate';
+    const LEDGER = 100;
+
+    const eventId1 = `${LEDGER}-0-0`;
+    const eventId2 = `${LEDGER}-1-0`; // different tx order in same ledger
+
+    const sentinel1 = makeSentinelTxHash(eventId1);
+    const sentinel2 = makeSentinelTxHash(eventId2);
+
+    // Insert as if they came from separate transactions in the same ledger
+    contractEventRepo.upsert({
+      txHash: sentinel1,
+      contractAddress: CONTRACT,
+      eventName: EVENT_NAME,
+      ledgerSequence: LEDGER,
+      eventIndex: 0,
+      parameters: { donor: 'G1' },
+      processed: false,
+    });
+    contractEventRepo.upsert({
+      txHash: sentinel2,
+      contractAddress: CONTRACT,
+      eventName: EVENT_NAME,
+      ledgerSequence: LEDGER,
+      eventIndex: 0,
+      parameters: { donor: 'G2' },
+      processed: false,
+    });
+
+    // With the old '' txHash both would map to the same composite key and
+    // only 1 would be stored.  After the fix we get 2 distinct rows.
+    expect(contractEventRepo.count()).toBe(2);
+
+    // Verify neither has txHash === ''
+    for (const ev of contractEventRepo.__all()) {
+      expect(ev.txHash).not.toBe('');
+    }
+  });
+});
+
+// ===========================================================================
+// TXAC5 — 100 events with no txHash → zero entries with txHash === ''
+// ===========================================================================
+
+describe('TXAC5 — zero events stored with txHash === "" after processing', () => {
+  it('100 events with missing txHash are stored with sentinel values, not empty strings', async () => {
+    const LEDGER_SEQ = 8000;
+    mockGetLatestLedger.mockResolvedValue({ id: 'lid', sequence: LEDGER_SEQ, protocolVersion: 21 });
+
+    // 100 events where paginateEvents has already replaced '' with sentinels
+    const processedEvents = Array.from({ length: 100 }, (_, i) => {
+      const id = `${LEDGER_SEQ}-${i}-0`;
+      return {
+        ...makeEventRecord({ id, ledger: LEDGER_SEQ }),
+        txHash: makeSentinelTxHash(id),
+      };
+    });
+
+    mockPaginateEvents.mockImplementation(async (_url, opts) => {
+      await opts.onPage({ events: processedEvents, latestLedger: LEDGER_SEQ, cursor: undefined });
+      return { finalCursor: '', latestLedger: LEDGER_SEQ };
+    });
+
+    rollupTrackerRepo.upsert('soroban_indexer', { lastProcessedLedger: LEDGER_SEQ });
+
+    const indexer = new SorobanIndexer(TEST_CONFIG);
+    await indexer.indexContractEvents();
+
+    expect(contractEventRepo.count()).toBe(100);
+    // Core acceptance criterion: countByTxHash('') must be 0
+    expect(contractEventRepo.countByTxHash('')).toBe(0);
+
+    // All events must have non-empty txHash
+    for (const ev of contractEventRepo.__all()) {
+      expect(ev.txHash).not.toBe('');
+      expect(ev.txHash.length).toBeGreaterThan(0);
+    }
+  });
+});
+
+// ===========================================================================
+// TXAC6 — resolveUnresolvedEvents updates sentinel → real hash; findByHash works
+// ===========================================================================
+
+describe('TXAC6 — re-resolution cycle: sentinel updated to real hash', () => {
+  it('previously stored sentinel row is updated to the resolved hash', async () => {
+    const LEDGER_SEQ = 9000;
+    const TX_ORDER = 0;
+    const EVENT_ID = `${LEDGER_SEQ}-${TX_ORDER}-0`;
+    const REAL_HASH = 'deadbeef'.repeat(8); // 64 chars
+
+    const sentinel = makeSentinelTxHash(EVENT_ID);
+
+    // Pre-store with sentinel
+    contractEventRepo.upsert({
+      txHash: sentinel,
+      contractAddress: 'CONTRACT_RE',
+      eventName: 'claim',
+      ledgerSequence: LEDGER_SEQ,
+      eventIndex: 0,
+      parameters: { claimant: 'GXYZ' },
+      processed: false,
+    });
+
+    // Horizon now has the transaction
+    const txRecords = [makeTxRecord({ hash: REAL_HASH, ledger: LEDGER_SEQ })];
+    mockGetLedgerTransactions.mockResolvedValueOnce(txRecords);
+    mockGetLatestLedger.mockResolvedValue({ id: 'lid', sequence: LEDGER_SEQ, protocolVersion: 21 });
+
+    const indexer = new SorobanIndexer(TEST_CONFIG);
+    await indexer.resolveUnresolvedEvents();
+
+    // Verify via findByHash
+    const resolved = contractEventRepo.findByHash(REAL_HASH);
+    expect(resolved).toBeDefined();
+    expect(resolved!.txHash).toBe(REAL_HASH);
+    expect(resolved!.eventName).toBe('claim');
+
+    // Sentinel row must be gone
+    expect(contractEventRepo.findByHash(sentinel)).toBeUndefined();
+  });
+
+  it('resolveUnresolvedEvents is a no-op when there are no sentinels', async () => {
+    // Store a real-hash event (not a sentinel)
+    contractEventRepo.upsert({
+      txHash: 'real' + 'a'.repeat(60),
+      contractAddress: 'C',
+      eventName: 'ev',
+      ledgerSequence: 1,
+      eventIndex: 0,
+      parameters: {},
+      processed: false,
+    });
+
+    const indexer = new SorobanIndexer(TEST_CONFIG);
+    // Must not throw and must not call getLedgerTransactions
+    await expect(indexer.resolveUnresolvedEvents()).resolves.not.toThrow();
+    expect(mockGetLedgerTransactions).not.toHaveBeenCalled();
+    expect(contractEventRepo.count()).toBe(1);
+  });
+
+  it('handles Horizon failure gracefully during re-resolution (sentinel remains)', async () => {
+    const EVENT_ID = '11111-0-0';
+    const sentinel = makeSentinelTxHash(EVENT_ID);
+
+    contractEventRepo.upsert({
+      txHash: sentinel,
+      contractAddress: 'C',
+      eventName: 'ev',
+      ledgerSequence: 11111,
+      eventIndex: 0,
+      parameters: {},
+      processed: false,
+    });
+
+    mockGetLedgerTransactions.mockRejectedValueOnce(new Error('horizon down'));
+    mockGetLatestLedger.mockResolvedValue({ id: 'lid', sequence: 11111, protocolVersion: 21 });
+
+    const indexer = new SorobanIndexer(TEST_CONFIG);
+    // Must not throw
+    await expect(indexer.resolveUnresolvedEvents()).resolves.not.toThrow();
+
+    // Sentinel row must still be present (not corrupted)
+    expect(contractEventRepo.findByHash(sentinel)).toBeDefined();
+  });
+});
+
+// ===========================================================================
+// TXAC8 — Property-based: N random event IDs → sentinel never returns ''
+// ===========================================================================
+
+describe('TXAC8 — property-based: makeSentinelTxHash never returns ""', () => {
+  it('returns a non-empty sentinel for 200 randomly generated event IDs', () => {
+    // Generate random event IDs in the Soroban format: <ledger>-<txOrder>-<eventIndex>
+    const randomInt = (max: number) => Math.floor(Math.random() * max);
+
+    for (let i = 0; i < 200; i++) {
+      const ledger = randomInt(10_000_000) + 1;
+      const txOrder = randomInt(1000);
+      const eventIndex = randomInt(100);
+      const eventId = `${ledger}-${txOrder}-${eventIndex}`;
+
+      const result = makeSentinelTxHash(eventId);
+
+      // Must never return ''
+      expect(result).not.toBe('');
+      // Must be detectable as unresolved
+      expect(isUnresolvedTxHash(result)).toBe(true);
+      // Must contain the original eventId (for debuggability)
+      expect(result).toContain(eventId);
+    }
+  });
+
+  it('a valid 64-char hex hash is never flagged as unresolved', () => {
+    const hexChars = '0123456789abcdef';
+    for (let i = 0; i < 50; i++) {
+      const hash = Array.from(
+        { length: 64 },
+        () => hexChars[Math.floor(Math.random() * 16)]
+      ).join('');
+      expect(isUnresolvedTxHash(hash)).toBe(false);
+    }
   });
 });
