@@ -228,6 +228,84 @@ export const contractEventRepo = {
     return count;
   },
 
+  /**
+   * Find a stored ContractEvent by its txHash.
+   * Returns the first matching row, or undefined if none found.
+   * Primarily used to verify re-resolution in tests.
+   */
+  findByHash(txHash: string): ContractEvent | undefined {
+    for (const ev of eventStore.values()) {
+      if (ev.txHash === txHash) return ev;
+    }
+    return undefined;
+  },
+
+  /**
+   * Find all ContractEvents that have an unresolved sentinel txHash
+   * (i.e. `txHash.startsWith('unresolved:')`).
+   *
+   * Used by the re-resolution cycle in the indexer to pick up events
+   * that were stored while the Horizon fallback was unavailable.
+   */
+  findBySentinel(): ContractEvent[] {
+    const result: ContractEvent[] = [];
+    for (const ev of eventStore.values()) {
+      if (ev.txHash.startsWith('unresolved:')) result.push(ev);
+    }
+    return result;
+  },
+
+  /**
+   * Replace a sentinel txHash with the resolved real hash.
+   *
+   * This re-keys the event in the store:
+   *   - The old composite key (built with the sentinel) is removed.
+   *   - A new composite key (built with the real hash) is inserted.
+   *   - If the new key already exists, the old sentinel row is dropped
+   *     (the real-hash row wins — the event was already resolved elsewhere).
+   *
+   * Returns the updated row, or undefined if the old sentinel was not found.
+   */
+  updateTxHash(
+    sentinelTxHash: string,
+    contractAddress: string,
+    eventName: string,
+    ledgerSequence: number,
+    eventIndex: number,
+    resolvedTxHash: string
+  ): ContractEvent | undefined {
+    const oldKey = eventCompositeKey(
+      sentinelTxHash,
+      contractAddress,
+      eventName,
+      ledgerSequence,
+      eventIndex
+    );
+    const existing = eventStore.get(oldKey);
+    if (!existing) return undefined;
+
+    const newKey = eventCompositeKey(
+      resolvedTxHash,
+      contractAddress,
+      eventName,
+      ledgerSequence,
+      eventIndex
+    );
+
+    // Remove the old sentinel entry regardless
+    eventStore.delete(oldKey);
+
+    // If the new key already exists (e.g. parallel resolution), just return
+    // the winning row without overwriting it.
+    if (eventStore.has(newKey)) {
+      return eventStore.get(newKey)!;
+    }
+
+    const updated: ContractEvent = { ...existing, txHash: resolvedTxHash };
+    eventStore.set(newKey, updated);
+    return updated;
+  },
+
   /** All unprocessed events (consumed by downstream pipelines) */
   findUnprocessed(): ContractEvent[] {
     const result: ContractEvent[] = [];

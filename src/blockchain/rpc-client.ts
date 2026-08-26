@@ -105,6 +105,53 @@ export async function getLatestLedger(rpcUrl: string): Promise<SorobanLatestLedg
 }
 
 // ---------------------------------------------------------------------------
+// txHash resolution cache
+// ---------------------------------------------------------------------------
+
+/**
+ * Bounded in-memory LRU-style cache for resolved txHash values.
+ *
+ * Key:   Soroban event ID string (unique per-event, position-based)
+ * Value: resolved 64-char hex txHash string
+ *
+ * The cache is bounded by MAX_CACHE_SIZE entries. When the limit is reached,
+ * the oldest quarter of entries (by insertion order) are evicted. This keeps
+ * memory bounded while keeping recently-seen events fast to resolve.
+ *
+ * Scope: module-level singleton — survives across getEvents calls within the
+ * same Node.js process (same as batchGetLedgerTransactions's concurrency
+ * semantics).
+ */
+const MAX_CACHE_SIZE = 50_000;
+
+// Map preserves insertion order, which we exploit for eviction.
+const txHashCache = new Map<string, string>();
+
+/** Store a resolved txHash in the cache, evicting old entries if needed. */
+function cachePut(eventId: string, txHash: string): void {
+  if (txHashCache.size >= MAX_CACHE_SIZE) {
+    // Evict oldest quarter of entries
+    const evictCount = Math.floor(MAX_CACHE_SIZE / 4);
+    const keys = txHashCache.keys();
+    for (let i = 0; i < evictCount; i++) {
+      const next = keys.next();
+      if (!next.done) txHashCache.delete(next.value);
+    }
+  }
+  txHashCache.set(eventId, txHash);
+}
+
+/** Look up a cached txHash by event ID. Returns undefined on miss. */
+function cacheGet(eventId: string): string | undefined {
+  return txHashCache.get(eventId);
+}
+
+/** Test-only: clear the cache between test runs. */
+export function __clearTxHashCache(): void {
+  txHashCache.clear();
+}
+
+// ---------------------------------------------------------------------------
 // Soroban RPC: getEvents (with cursor-based pagination)
 // ---------------------------------------------------------------------------
 
@@ -117,6 +164,13 @@ export interface GetEventsOptions {
   limit: number;
   /** Pagination cursor from a previous response */
   cursor?: string;
+  /**
+   * Horizon base URL used to resolve txHash for events that don't include it
+   * directly in the RPC response (pre-Protocol-21 nodes or non-standard nodes).
+   * When omitted, missing txHash values receive a sentinel string instead of
+   * triggering a Horizon fallback lookup.
+   */
+  horizonUrl?: string;
 }
 
 /** Raw result shape from the Soroban RPC `getEvents` response */
@@ -140,10 +194,64 @@ interface RawEvent {
 }
 
 /**
+ * Parses the positional segments of a Soroban event ID.
+ *
+ * Format: `<ledgerSequence>-<txOrderInLedger>-<eventIndexInTx>`
+ * Example: "12345-2-0" → { ledgerSeq: 12345, txOrder: 2, eventIndex: 0 }
+ *
+ * Returns null when the format is unexpected (future-proofing).
+ */
+function parseEventId(
+  eventId: string
+): { ledgerSeq: number; txOrder: number; eventIndex: number } | null {
+  const parts = eventId.split('-');
+  if (parts.length < 3) return null;
+  const ledgerSeq = parseInt(parts[0], 10);
+  const txOrder = parseInt(parts[1], 10);
+  const eventIndex = parseInt(parts[parts.length - 1], 10);
+  if (isNaN(ledgerSeq) || isNaN(txOrder) || isNaN(eventIndex)) return null;
+  return { ledgerSeq, txOrder, eventIndex };
+}
+
+/**
+ * Returns the sentinel txHash for an event whose real hash cannot be resolved.
+ *
+ * Sentinel format: `'unresolved:<eventId>'`
+ *
+ * Properties:
+ *   - Starts with 'unresolved:' → detectable with a startsWith check
+ *   - Never empty (satisfies the "never ''" requirement)
+ *   - Unique per event (eventId encodes ledger+txOrder+eventIndex position)
+ *   - Lexicographically outside the 64-char hex hash space
+ */
+export function makeSentinelTxHash(eventId: string): string {
+  return `unresolved:${eventId}`;
+}
+
+/**
+ * Returns true when a txHash value is an unresolved sentinel.
+ * Use this to filter events that still need re-resolution.
+ */
+export function isUnresolvedTxHash(txHash: string): boolean {
+  return txHash.startsWith('unresolved:');
+}
+
+/**
  * Fetches one page of Soroban contract events.
  *
  * Soroban RPC method: `getEvents`
  * Protocol 21 pagination uses cursor strings, not numeric offsets.
+ *
+ * txHash resolution strategy (in priority order):
+ *   1. Use e.txHash from the RPC response directly when present.
+ *   2. Check the in-process txHashCache for a previously resolved value.
+ *   3. If horizonUrl is provided, perform a batched Horizon fallback:
+ *      - Group events missing txHash by ledgerSequence.
+ *      - For each unique ledger, fetch its full transaction list once.
+ *      - Resolve each event using Map<txOrder, txHash>.
+ *      - Cache each resolved value.
+ *   4. If fallback also fails (network error, tx not found), assign the
+ *      sentinel 'unresolved:<eventId>' — never an empty string.
  *
  * Caller is responsible for looping across pages — this function fetches
  * exactly one page.
@@ -173,17 +281,126 @@ export async function getEvents(
 
   const raw = await sorobanRpc<RawEventsResult>(rpcUrl, 'getEvents', params);
 
-  const events: SorobanEvent[] = raw.events.map((e) => ({
-    type: e.type,
-    ledger: e.ledger,
-    ledgerClosedAt: e.ledgerClosedAt,
-    contractId: e.contractId,
-    id: e.id,
-    pagingToken: e.pagingToken,
-    topic: e.topic,
-    value: e.value,
-    inSuccessfulContractCall: e.inSuccessfulContractCall,
-    txHash: e.txHash ?? extractTxHashFromEventId(e.id),
+  // ------------------------------------------------------------------
+  // Phase 1: assign txHash from RPC response or cache
+  // ------------------------------------------------------------------
+  //
+  // Build an intermediate array that records which events still need
+  // a fallback Horizon lookup.  We collect unique (ledgerSeq → txOrder)
+  // pairs so we can batch the Horizon calls.
+
+  interface IntermediateEvent {
+    raw: RawEvent;
+    txHash: string | null; // null = needs fallback
+  }
+
+  const intermediate: IntermediateEvent[] = raw.events.map((e) => {
+    // Case 1: RPC node returned txHash directly
+    if (e.txHash && e.txHash.length > 0) {
+      cachePut(e.id, e.txHash);
+      return { raw: e, txHash: e.txHash };
+    }
+
+    // Case 2: cache hit from a previous call
+    const cached = cacheGet(e.id);
+    if (cached) {
+      return { raw: e, txHash: cached };
+    }
+
+    // Case 3: needs fallback
+    return { raw: e, txHash: null };
+  });
+
+  // ------------------------------------------------------------------
+  // Phase 2: batch Horizon fallback for events that still need resolution
+  // ------------------------------------------------------------------
+  //
+  // Group missing events by ledgerSeq, fetch each ledger's transaction
+  // list exactly once, then resolve.
+
+  const needsResolution = intermediate.filter((ev) => ev.txHash === null);
+
+  if (needsResolution.length > 0 && options.horizonUrl) {
+    // Build: Map<ledgerSeq, Map<txOrder, eventId[]>>
+    // We collect eventId[] per txOrder so multiple events in the same
+    // transaction are resolved in one pass.
+    const ledgerToTxOrderToEvents = new Map<number, Map<number, IntermediateEvent[]>>();
+
+    for (const ev of needsResolution) {
+      const pos = parseEventId(ev.raw.id);
+      if (!pos) continue; // malformed id — will get sentinel below
+
+      let txOrderMap = ledgerToTxOrderToEvents.get(pos.ledgerSeq);
+      if (!txOrderMap) {
+        txOrderMap = new Map<number, IntermediateEvent[]>();
+        ledgerToTxOrderToEvents.set(pos.ledgerSeq, txOrderMap);
+      }
+
+      let evList = txOrderMap.get(pos.txOrder);
+      if (!evList) {
+        evList = [];
+        txOrderMap.set(pos.txOrder, evList);
+      }
+      evList.push(ev);
+    }
+
+    // Fetch one ledger at a time (already batched per ledger, not per event)
+    const ledgerSeqs = Array.from(ledgerToTxOrderToEvents.keys());
+
+    await Promise.allSettled(
+      ledgerSeqs.map(async (ledgerSeq) => {
+        const txOrderMap = ledgerToTxOrderToEvents.get(ledgerSeq)!;
+        try {
+          const txRecords = await getLedgerTransactions(options.horizonUrl!, ledgerSeq);
+          // Build Map<txOrder(0-based), txHash>
+          // Horizon returns transactions ordered asc; index is 0-based txOrder.
+          const txOrderToHash = new Map<number, string>();
+          txRecords.forEach((tx, idx) => {
+            txOrderToHash.set(idx, tx.hash);
+          });
+
+          // Resolve each event that needed this ledger
+          for (const [txOrder, evList] of txOrderMap.entries()) {
+            const resolvedHash = txOrderToHash.get(txOrder);
+            for (const ev of evList) {
+              if (resolvedHash) {
+                ev.txHash = resolvedHash;
+                cachePut(ev.raw.id, resolvedHash);
+              }
+              // If txOrder not found, txHash stays null → sentinel assigned below
+            }
+          }
+        } catch {
+          // Network error or node not available — all events in this ledger
+          // will receive the sentinel value below.
+        }
+      })
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // Phase 3: assign sentinel to any events still unresolved
+  // ------------------------------------------------------------------
+  for (const ev of intermediate) {
+    if (ev.txHash === null) {
+      ev.txHash = makeSentinelTxHash(ev.raw.id);
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Phase 4: map to SorobanEvent[]
+  // ------------------------------------------------------------------
+  const events: SorobanEvent[] = intermediate.map((ev) => ({
+    type: ev.raw.type,
+    ledger: ev.raw.ledger,
+    ledgerClosedAt: ev.raw.ledgerClosedAt,
+    contractId: ev.raw.contractId,
+    id: ev.raw.id,
+    pagingToken: ev.raw.pagingToken,
+    topic: ev.raw.topic,
+    value: ev.raw.value,
+    inSuccessfulContractCall: ev.raw.inSuccessfulContractCall,
+    txHash: ev.txHash as string, // guaranteed non-null after Phase 3
   }));
 
   return {
@@ -217,6 +434,7 @@ export async function paginateEvents(
       startLedger: options.startLedger,
       contractAddress: options.contractAddress,
       limit: options.limit,
+      horizonUrl: options.horizonUrl,
       cursor,
     });
 
@@ -312,21 +530,6 @@ export async function batchGetLedgerTransactions(
 // ---------------------------------------------------------------------------
 // Utilities
 // ---------------------------------------------------------------------------
-
-/**
- * Soroban event IDs follow the format `<ledger>-<txIndex>-<eventIndex>`.
- * This function extracts the event index from the id string.
- *
- * Note: Soroban RPC Protocol 21+ also returns `txHash` directly on the
- * event object; this is a fallback for older nodes that omit it.
- */
-function extractTxHashFromEventId(_id: string): string {
-  // The event `id` is NOT the txHash — it's a composite position string.
-  // If the RPC response doesn't include txHash directly, we cannot recover
-  // it from the event ID alone without an additional Horizon lookup.
-  // Return an empty string; callers should guard against this.
-  return '';
-}
 
 /**
  * Parses the zero-based event index from a Soroban event ID string.
