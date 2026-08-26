@@ -112,3 +112,71 @@ describe('useWalletEnhanced.switchNetwork (issue #105)', () => {
     expect(useWalletStore.getState().network).toBe('standalone')
   })
 })
+
+// ---------------------------------------------------------------------------
+// AC5 — Integration test: connectWallet stores real balance (issue #86)
+// ---------------------------------------------------------------------------
+
+describe('useWalletEnhanced.connectWallet stores real Horizon balance (AC5)', () => {
+  let queryClient: QueryClient
+  const MOCK_ADDRESS = 'GABC456TESTADDRESS'
+  const MOCK_BALANCE = '9999.9999800'
+
+  beforeEach(() => {
+    __clearSorobanSDKCache()
+    // Start with a disconnected wallet on testnet.
+    useWalletStore.setState({
+      isConnected: false,
+      address: null,
+      publicKey: null,
+      network: 'testnet',
+      balance: '0',
+    })
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    jest.clearAllMocks()
+  })
+
+  it('stores the mocked Horizon balance in the wallet store after connectWallet()', async () => {
+    // Mock Freighter to return our test address.
+    ;(walletService.connectFreighter as jest.Mock).mockResolvedValue({
+      address: MOCK_ADDRESS,
+      publicKey: MOCK_ADDRESS,
+    })
+
+    // Spy on getBalance of the SDK instance that will be used by connectWallet.
+    // connectWallet calls getSorobanSDK(store.network).getBalance(), so we
+    // pre-warm the cache and then spy on the resulting instance.
+    const sdk = getSorobanSDK('testnet')
+    jest.spyOn(sdk, 'getBalance').mockResolvedValue(MOCK_BALANCE)
+
+    const { result } = renderHook(() => useWalletEnhanced(), { wrapper: wrapper(queryClient) })
+
+    await act(async () => {
+      await result.current.connectWallet()
+    })
+
+    // The wallet store should have the real (mocked) balance, not '0'.
+    expect(useWalletStore.getState().balance).toBe(MOCK_BALANCE)
+    expect(useWalletStore.getState().balance).not.toBe('0')
+    expect(useWalletStore.getState().isConnected).toBe(true)
+    expect(useWalletStore.getState().address).toBe(MOCK_ADDRESS)
+  })
+
+  it('calls getBalance with the connected wallet address', async () => {
+    ;(walletService.connectFreighter as jest.Mock).mockResolvedValue({
+      address: MOCK_ADDRESS,
+      publicKey: MOCK_ADDRESS,
+    })
+
+    const sdk = getSorobanSDK('testnet')
+    const getBalanceSpy = jest.spyOn(sdk, 'getBalance').mockResolvedValue('42.0000000')
+
+    const { result } = renderHook(() => useWalletEnhanced(), { wrapper: wrapper(queryClient) })
+
+    await act(async () => {
+      await result.current.connectWallet()
+    })
+
+    expect(getBalanceSpy).toHaveBeenCalledWith(MOCK_ADDRESS)
+  })
+})

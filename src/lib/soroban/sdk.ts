@@ -1,5 +1,5 @@
-import { SorobanRpc, xdr, TransactionBuilder, Networks, Operation, BASE_FEE } from '@stellar/stellar-sdk'
-import { SOROBAN_NETWORKS } from '@/config/constants'
+import { SorobanRpc, Horizon, xdr, TransactionBuilder, Networks, Operation, BASE_FEE } from '@stellar/stellar-sdk'
+import { NETWORKS as HORIZON_NETWORKS, SOROBAN_NETWORKS } from '@/config/constants'
 
 export interface NetworkConfig {
   networkPassphrase: string
@@ -71,6 +71,22 @@ export class SorobanTimeoutError extends Error {
   }
 }
 
+/**
+ * Thrown by getBalance when Horizon returns a 404 for the given address,
+ * indicating the account has never been funded on this network.
+ * Callers can `instanceof`-check this to show "account not funded" UI
+ * rather than a generic network-error message.
+ */
+export class AccountNotFoundError extends Error {
+  constructor(
+    /** The address that was not found on the network. */
+    public readonly address: string
+  ) {
+    super(`Account not found on network: ${address}`)
+    this.name = 'AccountNotFoundError'
+  }
+}
+
 export interface SorobanSDKOptions {
   /**
    * Soroban fees are resource-based, not flat. The resource-fee portion of
@@ -107,6 +123,8 @@ export interface InvokeContractResult {
 
 export class SorobanSDK {
   private rpc: SorobanRpc.Server
+  /** Horizon REST API server for the same network — used by getBalance. */
+  private horizon: Horizon.Server
   /**
    * Public and readonly so callers (and tests) can read the passphrase a
    * given SDK instance is bound to without an extra getter call, e.g.
@@ -124,12 +142,29 @@ export class SorobanSDK {
     this.rpc = new SorobanRpc.Server(config.rpcUrl, {
       allowHttp: network === 'standalone',
     })
+    this.horizon = new Horizon.Server(this.getHorizonUrl(network), {
+      allowHttp: network === 'standalone',
+    })
     this.network = network
     this.networkPassphrase = config.networkPassphrase
 
     this.feeMultiplier = options.feeMultiplier ?? 1.5
     this.pollIntervalMs = options.pollIntervalMs ?? 2000
     this.pollTimeoutMs = options.pollTimeoutMs ?? 30000
+  }
+
+  /**
+   * Maps a NetworkName to the corresponding Horizon REST API base URL,
+   * using the NETWORKS constant from src/config/constants.ts.
+   */
+  private getHorizonUrl(network: NetworkName): string {
+    const map: Record<NetworkName, string> = {
+      mainnet: HORIZON_NETWORKS.MAINNET,
+      testnet: HORIZON_NETWORKS.TESTNET,
+      futurenet: HORIZON_NETWORKS.FUTURENET,
+      standalone: HORIZON_NETWORKS.STANDALONE,
+    }
+    return map[network]
   }
 
   async getAccount(address: string) {
@@ -144,13 +179,29 @@ export class SorobanSDK {
 
   async getBalance(address: string): Promise<string> {
     try {
-      // SorobanRpc.Server.getAccount returns a stellar-base Account (sequence only).
-      // To get XLM balance we must query Horizon.
-      // For now return '0' as a safe fallback; balance display is non-critical for
-      // contract interaction. A full implementation should use a Horizon.Server instance.
-      await this.getAccount(address) // validate the account exists
-      return '0'
+      const account = await this.horizon.loadAccount(address)
+      const nativeBalance = account.balances.find(
+        (b): b is Horizon.ServerApi.BalanceLine<'native'> => b.asset_type === 'native'
+      )
+      if (!nativeBalance) {
+        // This should not happen for a funded account — native XLM balance
+        // is always present — but handle defensively.
+        return '0.0000000'
+      }
+      // Enforce exactly 7 decimal places to match Stellar's stroop precision
+      // and be directly displayable in the fee UI without further formatting.
+      return parseFloat(nativeBalance.balance).toFixed(7)
     } catch (error) {
+      // Horizon 404 means the account has never been funded on this network.
+      // Propagate as a typed error so callers can show "account not funded" UI.
+      if (
+        error &&
+        typeof error === 'object' &&
+        'response' in error &&
+        (error as { response?: { status?: number } }).response?.status === 404
+      ) {
+        throw new AccountNotFoundError(address)
+      }
       console.error('Error fetching balance:', error)
       throw error
     }
