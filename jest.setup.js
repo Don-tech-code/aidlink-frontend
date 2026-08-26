@@ -1,5 +1,9 @@
 import '@testing-library/jest-dom'
 
+// Use an in-memory SQLite database for all tests so no on-disk artefacts are
+// created and each test worker gets full isolation via __resetDb().
+process.env.BLOCKCHAIN_DB_PATH = ':memory:'
+
 // TextEncoder / TextDecoder (not always available in jsdom)
 const { TextEncoder, TextDecoder } = require('util')
 if (typeof globalThis.TextEncoder === 'undefined') globalThis.TextEncoder = TextEncoder
