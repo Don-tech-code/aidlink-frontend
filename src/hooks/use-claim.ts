@@ -34,7 +34,6 @@ import { signTransaction } from '@stellar/freighter-api'
 import { SOROBAN_NETWORKS } from '@/config/constants'
 import { useWalletStore } from '@/store/wallet-store'
 import {
-  validateClaimToken,
   isTokenExpiredSync,
   stroopsToXlm,
   formatClaimFeeXlm,
@@ -45,7 +44,7 @@ import {
   VerificationRequiredError,
   AllocationsContractNotConfiguredError,
 } from '@/lib/beneficiary/allocations'
-import type { Allocation, ClaimState, ClaimStatus } from '@/types'
+import type { Allocation, ClaimState, ClaimStatus, ClaimTokenValidation } from '@/types'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -84,6 +83,34 @@ function getNetworkPassphrase(network: string): string {
   const key = network.toUpperCase() as keyof typeof SOROBAN_NETWORKS
   const config = SOROBAN_NETWORKS[key] ?? SOROBAN_NETWORKS.TESTNET
   return config.networkPassphrase
+}
+
+// ---------------------------------------------------------------------------
+// Server-side token validation
+// ---------------------------------------------------------------------------
+
+/**
+ * Validate a claim token by POSTing it to the server route.
+ *
+ * Signature verification needs the HMAC secret, which now lives only on the
+ * server (claim-token.server.ts). Routing validation through the API keeps the
+ * secret out of the browser bundle while preserving the exact
+ * {@link ClaimTokenValidation} contract the state machine consumed when
+ * validation ran locally.
+ */
+async function postValidateClaimToken(
+  tokenString: string,
+  connectedAddress: string,
+): Promise<ClaimTokenValidation> {
+  const res = await fetch('/api/v1/claim-token/validate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: tokenString, connectedAddress }),
+  })
+  if (!res.ok) {
+    throw new Error(`Claim token validation request failed (${res.status})`)
+  }
+  return (await res.json()) as ClaimTokenValidation
 }
 
 // ---------------------------------------------------------------------------
@@ -354,8 +381,9 @@ export function useClaim(
         return
       }
 
-      // 1b. Full async validation (HMAC + address match)
-      const validation = await validateClaimToken(claimToken, address)
+      // 1b. Full async validation (HMAC + address match) runs on the server,
+      //     where the signing secret lives — never in the browser bundle.
+      const validation = await postValidateClaimToken(claimToken, address)
 
       if (!validation.valid) {
         if (validation.reason === 'expired') {

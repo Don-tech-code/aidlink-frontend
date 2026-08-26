@@ -133,6 +133,12 @@ export interface ClaimTokenPayload {
   exp: number
   /** HMAC-SHA256 signature over the canonical fields, hex-encoded */
   sig: string
+  /**
+   * Identifier of the signing key from the server key ring. Optional: tokens
+   * issued before key-ring support (no `kid`) remain valid for backward
+   * compatibility and are verified against every key currently in the ring.
+   */
+  kid?: string
 }
 
 /**

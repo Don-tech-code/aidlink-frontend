@@ -1,5 +1,5 @@
 /**
- * Claim token generation and validation for the AidLink beneficiary portal.
+ * Claim token helpers for the AidLink beneficiary portal (client-safe).
  *
  * Design
  * ──────
@@ -8,27 +8,25 @@
  * readers can scan it.
  *
  * The structure includes: claimId, beneficiaryAddress, campaignId,
- * allocatedAmount, exp (Unix seconds), and an HMAC-SHA256 signature over the
- * canonical fields.
+ * allocatedAmount, exp (Unix seconds), an optional `kid` (signing-key id), and
+ * an HMAC-SHA256 signature over the canonical fields.
  *
  * Security
  * ──────
- * • Private key material NEVER leaves the server — only the HMAC digest is
- *   embedded in the QR payload.
- * • The signature prevents a beneficiary from crafting a valid token for an
- *   allocation that doesn't belong to them.
- * • Expiry is enforced client-side before any transaction is built, with 30s
- *   of allowed clock skew.
- * • No npm dependencies are added — Web Crypto API (crypto.subtle) is used for
- *   HMAC-SHA256 throughout.
- *
- * In production the HMAC key would be fetched from a server-side API and kept
- * in memory only; in this client-side implementation it is derived from the
- * environment variable NEXT_PUBLIC_CLAIM_TOKEN_SECRET (or a safe fallback for
- * development) so the flow can be fully exercised in tests.
+ * • The HMAC signing secret NEVER reaches the browser. All signing and
+ *   signature verification live in the server-only module
+ *   `claim-token.server.ts` (which does `import 'server-only'`) and are exposed
+ *   to the client exclusively through the `/api/v1/claim-token` endpoints.
+ * • This module contains ONLY the pure, non-secret helpers that both the client
+ *   and the server need: canonical-message construction, base64url encode/
+ *   decode, and the sync expiry/formatting utilities used to render the UI.
+ * • Because nothing here touches the secret, importing it into a client bundle
+ *   cannot leak key material.
+ * • No npm dependencies are added — Web Crypto is used server-side; this file is
+ *   dependency-free.
  */
 
-import type { ClaimTokenPayload, ClaimTokenValidation } from '@/types'
+import type { ClaimTokenPayload } from '@/types'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -49,45 +47,6 @@ export const TOKEN_TTL_SECONDS = 15 * 60 // 15 minutes
 export const REMOTE_TOKEN_TTL_SECONDS = 72 * 60 * 60
 
 // ---------------------------------------------------------------------------
-// HMAC key derivation
-// ---------------------------------------------------------------------------
-
-/**
- * Import a raw HMAC-SHA256 key from an arbitrary string secret.
- *
- * Uses the Web Crypto API — available in all modern browsers and in
- * Next.js edge / Node runtime without polyfills.
- */
-async function importHmacKey(secret: string): Promise<CryptoKey> {
-  const keyMaterial = new TextEncoder().encode(secret)
-  return crypto.subtle.importKey(
-    'raw',
-    keyMaterial,
-    { name: 'HMAC', hash: 'SHA-256' },
-    false, // not extractable
-    ['sign', 'verify'],
-  )
-}
-
-/**
- * Return the HMAC key to use for claim tokens.
- *
- * In production: secret is read from a server-side API call and never exposed
- * to the client bundle.  In this client-side implementation we read from the
- * environment variable so the full flow can be exercised in tests and CI.
- *
- * The secret is intentionally never stored in module scope to make accidental
- * exposure harder.
- */
-async function getClaimKey(): Promise<CryptoKey> {
-  const secret =
-    (typeof process !== 'undefined' &&
-      process.env?.NEXT_PUBLIC_CLAIM_TOKEN_SECRET) ||
-    'aidlink-claim-token-dev-secret-change-in-production'
-  return importHmacKey(secret)
-}
-
-// ---------------------------------------------------------------------------
 // Canonical message construction
 // ---------------------------------------------------------------------------
 
@@ -102,6 +61,10 @@ async function getClaimKey(): Promise<CryptoKey> {
  *   `{claimId}\n{beneficiaryAddress}\n{campaignId}\n{allocatedAmount}\n{exp}`
  *
  * The `\n` delimiter is safe because none of the fields contain newlines.
+ *
+ * NOTE: `kid` is intentionally NOT part of the canonical message — it only
+ * selects which key verifies the signature, so the same token body stays
+ * verifiable regardless of which ring key produced it.
  */
 export function buildCanonicalMessage(
   claimId: string,
@@ -117,45 +80,6 @@ export function buildCanonicalMessage(
     String(allocatedAmount),
     String(exp),
   ].join('\n')
-}
-
-// ---------------------------------------------------------------------------
-// HMAC helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Compute HMAC-SHA256 of `message` using the provided key.
- * Returns the digest as a lowercase hex string.
- */
-async function hmacSign(key: CryptoKey, message: string): Promise<string> {
-  const data = new TextEncoder().encode(message)
-  const signature = await crypto.subtle.sign('HMAC', key, data)
-  return Array.from(new Uint8Array(signature))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('')
-}
-
-/**
- * Constant-time comparison for two hex strings.
- *
- * crypto.subtle.verify is timing-safe; we re-compute the expected HMAC and
- * let the API compare so we never implement our own timing-safe comparison.
- */
-async function hmacVerify(
-  key: CryptoKey,
-  message: string,
-  hexSig: string,
-): Promise<boolean> {
-  try {
-    // Convert hex → Uint8Array
-    const sigBytes = new Uint8Array(
-      hexSig.match(/.{2}/g)!.map((b) => parseInt(b, 16)),
-    )
-    const data = new TextEncoder().encode(message)
-    return await crypto.subtle.verify('HMAC', key, sigBytes, data)
-  } catch {
-    return false
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -196,142 +120,8 @@ export function base64urlDecode(input: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Public API
+// Sync (no-crypto) helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Generate a signed claim token for one allocation.
- *
- * @param claimId                Unique allocation ID from the contract.
- * @param beneficiaryAddress     Stellar public key of the intended claimant.
- * @param campaignId             Campaign the allocation belongs to.
- * @param allocatedAmountStroops Amount in XLM stroops (bigint or number).
- * @param ttlSeconds             Time-to-live in seconds (default: 15 minutes).
- * @returns                      A base64url-encoded JSON string suitable for
- *                               embedding in a QR code.
- */
-export async function generateClaimToken(
-  claimId: string,
-  beneficiaryAddress: string,
-  campaignId: string,
-  allocatedAmountStroops: bigint | number,
-  ttlSeconds: number = TOKEN_TTL_SECONDS,
-): Promise<string> {
-  const exp = Math.floor(Date.now() / 1000) + ttlSeconds
-  const allocatedAmount = String(allocatedAmountStroops)
-
-  const key = await getClaimKey()
-  const canonical = buildCanonicalMessage(
-    claimId,
-    beneficiaryAddress,
-    campaignId,
-    allocatedAmount,
-    exp,
-  )
-  const sig = await hmacSign(key, canonical)
-
-  const payload: ClaimTokenPayload = {
-    claimId,
-    beneficiaryAddress,
-    campaignId,
-    allocatedAmount, // stored as string — bigint is not JSON-serialisable
-    exp,
-    sig,
-  }
-
-  return base64urlEncode(JSON.stringify(payload))
-}
-
-/**
- * Decode and validate a claim token string.
- *
- * Validates:
- *  1. JSON is well-formed and all required fields are present.
- *  2. HMAC signature is correct.
- *  3. Token has not expired (clock-skew tolerance: ±30 s).
- *  4. Token is intended for the provided wallet address.
- *
- * @param tokenString       The base64url-encoded payload (from QR scan or prop).
- * @param connectedAddress  The currently connected Stellar wallet address.
- * @returns                 A ClaimTokenValidation discriminated union.
- */
-export async function validateClaimToken(
-  tokenString: string,
-  connectedAddress: string,
-): Promise<ClaimTokenValidation> {
-  // 1 — Decode and parse JSON
-  let payload: Partial<ClaimTokenPayload>
-  try {
-    const json = base64urlDecode(tokenString)
-    payload = JSON.parse(json) as Partial<ClaimTokenPayload>
-  } catch {
-    return {
-      valid: false,
-      reason: 'malformed',
-      message: 'The claim token could not be decoded. Please refresh the page.',
-    }
-  }
-
-  // 2 — Check required fields
-  if (
-    typeof payload.claimId !== 'string' ||
-    typeof payload.beneficiaryAddress !== 'string' ||
-    typeof payload.campaignId !== 'string' ||
-    payload.allocatedAmount === undefined ||
-    typeof payload.exp !== 'number' ||
-    typeof payload.sig !== 'string'
-  ) {
-    return {
-      valid: false,
-      reason: 'malformed',
-      message: 'The claim token is missing required fields. Please refresh the page.',
-    }
-  }
-
-  const fullPayload = payload as ClaimTokenPayload
-
-  // 3 — Check expiry (with clock-skew tolerance)
-  const nowSeconds = Math.floor(Date.now() / 1000)
-  if (nowSeconds > fullPayload.exp + CLOCK_SKEW_SECONDS) {
-    return {
-      valid: false,
-      reason: 'expired',
-      message:
-        'This claim token has expired. Refresh the page for a new one.',
-    }
-  }
-
-  // 4 — Verify HMAC signature
-  const key = await getClaimKey()
-  const canonical = buildCanonicalMessage(
-    fullPayload.claimId,
-    fullPayload.beneficiaryAddress,
-    fullPayload.campaignId,
-    String(fullPayload.allocatedAmount),
-    fullPayload.exp,
-  )
-  const sigValid = await hmacVerify(key, canonical, fullPayload.sig)
-  if (!sigValid) {
-    return {
-      valid: false,
-      reason: 'invalid-signature',
-      message:
-        'The claim token signature is invalid. Do not attempt to modify claim tokens.',
-    }
-  }
-
-  // 5 — Verify the token is for this wallet
-  if (fullPayload.beneficiaryAddress !== connectedAddress) {
-    return {
-      valid: false,
-      reason: 'wrong-address',
-      message:
-        'This claim token is not for the connected wallet. Connect the correct wallet and try again.',
-    }
-  }
-
-  return { valid: true, payload: fullPayload }
-}
 
 /**
  * Synchronously check whether a token's `exp` field indicates it is expired,
