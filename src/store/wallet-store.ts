@@ -3,8 +3,11 @@ import { persist } from 'zustand/middleware'
 import type { WalletState } from '@/types'
 import { getSorobanSDK } from '@/lib/soroban/sdk'
 
-/** Default session lifetime: 24 hours in milliseconds */
-const SESSION_TTL_MS = 24 * 60 * 60 * 1000
+/**
+ * Session TTL: 8 hours. Matches the value asserted in
+ * src/lib/store/__tests__/encrypted-storage.test.ts's TTL-expiry test.
+ */
+const SESSION_TTL_MS = 8 * 60 * 60 * 1000
 
 interface WalletStore extends WalletState {
   connectedAt: number | null

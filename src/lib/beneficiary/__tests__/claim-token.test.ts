@@ -1,5 +1,9 @@
 /**
- * Unit tests for src/lib/beneficiary/claim-token.ts
+ * Unit tests for the claim-token modules.
+ *
+ * Signing + verification live in the server-only module
+ * `claim-token.server.ts`; the pure, client-safe helpers live in
+ * `claim-token.ts`. Imports below are split accordingly.
  *
  * Coverage:
  *  - generateClaimToken: produces a valid base64url-encoded JSON payload
@@ -12,13 +16,17 @@
  *  - buildCanonicalMessage: deterministic ordering
  *  - base64urlEncode / base64urlDecode: round-trip
  *
- * The tests set process.env.NEXT_PUBLIC_CLAIM_TOKEN_SECRET to a fixed test
- * secret so token generation and validation use the same key deterministically.
+ * The tests set process.env.CLAIM_TOKEN_SECRET to a fixed test secret and
+ * reset the in-memory key ring so token generation and validation use the same
+ * key deterministically.
  */
 
 import {
   generateClaimToken,
   validateClaimToken,
+  __resetClaimKeyRing,
+} from '@/lib/beneficiary/claim-token.server'
+import {
   isTokenExpiredSync,
   getTokenExpiry,
   stroopsToXlm,
@@ -43,11 +51,14 @@ const CAMPAIGN_ID = 'campaign-abc'
 const AMOUNT_STROOPS = BigInt(100_000_000) // 10 XLM
 
 beforeAll(() => {
-  process.env.NEXT_PUBLIC_CLAIM_TOKEN_SECRET = TEST_SECRET
+  process.env.CLAIM_TOKEN_SECRET = TEST_SECRET
+  // Rebuild the key ring so it derives from the test secret set above.
+  __resetClaimKeyRing()
 })
 
 afterAll(() => {
-  delete process.env.NEXT_PUBLIC_CLAIM_TOKEN_SECRET
+  delete process.env.CLAIM_TOKEN_SECRET
+  __resetClaimKeyRing()
 })
 
 // ---------------------------------------------------------------------------
